@@ -93,6 +93,8 @@ def main():
     parser.add_argument('--dtb', type=Path, required=True, help='6.2 gts7lwifi DTB')
     parser.add_argument('--ramdisk', type=Path, required=True, help='deployed initramfs.cpio.gz')
     parser.add_argument('--output', type=Path, required=True, help='directory under out/')
+    parser.add_argument('--experiment', action='store_true',
+                        help='isolate a component: skip the 6.2 kernel and panel-node guards')
     args = parser.parse_args()
 
     preflight = load('boot_preflight', 'scripts/build/vendor/preflight-steamos-boot.py')
@@ -131,11 +133,15 @@ def main():
     ramdisk = Path(args.ramdisk).resolve()
     reference_kernel = (output / 'template' / 'kernel').read_bytes()
     kernel_data, header_fields = normalise_arm64_header(kernel.read_bytes(), reference_kernel)
+    if args.experiment:
+        # the vendor kernel already carries the Samsung header fields
+        kernel_data = kernel.read_bytes()
     version = kernel_version(kernel_data)
-    if '6.2' not in version.split()[2]:
-        raise ValueError(f'kernel is not 6.2: {version}')
-    if b'samsung,gts7l-nt36523' not in dtb.read_bytes():
-        raise ValueError('DTB does not contain the NT36523 panel node')
+    if not args.experiment:
+        if '6.2' not in version.split()[2]:
+            raise ValueError(f'kernel is not 6.2: {version}')
+        if b'samsung,gts7l-nt36523' not in dtb.read_bytes():
+            raise ValueError('DTB does not contain the NT36523 panel node')
     staged = {'kernel': output / kernel.name, 'dtb': output / dtb.name,
               'ramdisk': output / ramdisk.name}
     staged['kernel'].write_bytes(kernel_data)
@@ -191,7 +197,8 @@ def main():
     components = {name: {'path': display(path), 'bytes': path.stat().st_size,
                          'sha256': file_sha(path)} for name, path in staged.items()}
     report = {
-        'kind': 'mainline 6.2 SteamOS BOOT candidate',
+        'kind': ('component isolation experiment' if args.experiment
+                 else 'mainline 6.2 SteamOS BOOT candidate'),
         'image': display(signed), 'image_sha256': file_sha(signed),
         'image_bytes': signed.stat().st_size, 'partition_capacity': capacity,
         'template_boot': {'path': display(deployed), 'sha256': file_sha(deployed)},

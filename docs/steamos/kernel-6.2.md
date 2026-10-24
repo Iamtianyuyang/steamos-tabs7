@@ -110,3 +110,29 @@ scripts/build/mainline/build-steamos-6.2-boot.py \
 预期落在 initramfs 的 USB/telnet 环境（面板不亮也还能进），但没有任何真机证据。
 所以脚本只生成镜像，写盘仍要单独授权；回退镜像是
 `out/steamos/boot-preflight-20261024-145309/boot/boot.img`（`37f5aa13…`）。
+
+## 6.2 首启失败诊断（2026-10-24 实测）
+
+- **免 ODIN 的写入通道已打通**：`scripts/device/push-boot.py` 通过 RNDIS 把镜像推到
+  运行中的 SteamOS（内置 TCP 接收器 → 校验哈希 → `dd` 到 `/dev/disk/by-partlabel/boot`
+  → 读回比对）。71 MB 传输 + 写入 + 读回共约 10 s，完全不碰 ODIN。
+- **计时实验**：从 SteamOS 写入 6.2 候选（`ee332fa7…`）后重启，USB 状态为
+  0–12 s 无设备、**14 s 起稳定停在 Download mode（04e8:685d）**，全程未出现
+  initramfs 的 RNDIS gadget（1d6b:0104）——说明 6.2 的 initramfs 从未运行。
+- `/sys/fs/pstore` 为空：即使 `ramoops@9fa00000` 在 DTB 里、`PSTORE_RAM/CONSOLE/PMSG`
+  都开着，也没有任何记录 → 内核没有走到 pstore 初始化，或根本没被执行。
+- `misc` 的 BCB 前 96 字节全零，`param`/`misc` 里没有失败原因字符串。
+- 已知对照组：同一写入通道写回 `37f5aa13…`（vendor 4.19 内核 + vendor DTB）立即正常
+  启动，说明**写入路径和分区都没问题**，问题在 6.2 这套"内核 + DTB"组合。
+
+### 下一步的两个隔离实验（镜像已生成，等待上机）
+
+| 实验 | 内核 | DTB | 产物 | 判读 |
+| --- | --- | --- | --- | --- |
+| A | vendor 4.19 | 6.2 主线 | `out/steamos-kernel-6.2/exp-vendor-kernel-6.2-dtb/boot.img` `9b7d8d58…` | 若仍停在 Download → **6.2 的 DTB 就是触发点**（厂商 DTBO overlay 无法应用到主线 DTB，LK 视为启动失败） |
+| B | 6.2 | vendor 4.19 | `out/steamos-kernel-6.2/exp-6.2-kernel-vendor-dtb/boot.img` `ec62fe22…` | 若能出现 gadget → 内核本身可执行，问题集中在 DTB/overlay；若同样 Download → 内核在这块板子的早期初始化就挂了 |
+
+实验 A 的背景：仓库里的既有记录已指出"原厂 Android overlay 对主线 DTB 应用失败
+（`FDT_ERR_NOTFOUND`）"，本项目为 recovery 草稿专门做过空操作 overlay。LK 在 BOOT
+启动时同样会把 DTBO 分区的 overlay 应用到 BOOT 里的 DTB，这很可能是 14 秒后落回
+Download 的原因。
