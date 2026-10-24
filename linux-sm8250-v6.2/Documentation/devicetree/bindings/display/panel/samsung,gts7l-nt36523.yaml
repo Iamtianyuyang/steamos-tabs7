@@ -34,6 +34,15 @@ properties:
   buck-supply:
     description: switched panel buck rail (downstream "buck")
 
+  esd-gpios:
+    description:
+      Panel ESD interrupt line (downstream samsung,esd-irq-gpio1, rising edge).
+      A rising edge means the panel lost its state and has to be re-initialised.
+
+  ub-con-det-gpios:
+    description:
+      Second panel-status interrupt line (downstream samsung,ub-con-det).
+
   ports:
     $ref: /schemas/graph.yaml#/properties/ports
     properties:

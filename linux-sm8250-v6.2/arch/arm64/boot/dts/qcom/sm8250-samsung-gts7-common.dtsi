@@ -558,6 +558,14 @@
 	status = "disabled";
 	vdda-supply = <&vreg_l9a_1p2>;
 
+	/*
+	 * The panel is driven by both links (vendor topology <2 0 2>), so the
+	 * controllers are bonded: msm halves the horizontal timings per link and
+	 * sends each DCS command to both. dsi0 is the master link and clocks dsi1.
+	 */
+	qcom,dual-dsi-mode;
+	qcom,master-dsi;
+
 	ports {
 		port@1 {
 			dsi0_out: endpoint {
@@ -590,6 +598,8 @@
 &dsi1 {
 	status = "disabled";
 	vdda-supply = <&vreg_l9a_1p2>;
+
+	qcom,dual-dsi-mode;
 
 	/* Slave DSI — clocks driven from DSI0 PLL */
 	assigned-clock-parents = <&dsi0_phy 0>, <&dsi0_phy 1>;
@@ -661,6 +671,13 @@
 		/* vendor: qcom,panel-supply-entry@0 "vddlcd" and @1 "buck" */
 		vddio-supply = <&panel_vddio>;
 		buck-supply = <&panel_buck>;
+
+		/*
+		 * vendor: samsung,esd-irq-gpio1 (rising) and samsung,ub-con-det.
+		 * Both are pull-less inputs; a rising edge means the panel lost state.
+		 */
+		esd-gpios = <&tlmm 66 GPIO_ACTIVE_HIGH>;
+		ub-con-det-gpios = <&tlmm 46 GPIO_ACTIVE_HIGH>;
 
 		ports {
 			#address-cells = <1>;

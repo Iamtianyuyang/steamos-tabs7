@@ -17,6 +17,7 @@
 #include <linux/backlight.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
+#include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
@@ -55,6 +56,12 @@ struct nt36523 {
 	struct regulator *buck;
 	struct gpio_desc *reset_gpio;
 	struct backlight_device *backlight;
+
+	struct gpio_desc *esd_gpio;
+	struct gpio_desc *ub_con_det_gpio;
+	struct work_struct esd_work;
+	struct mutex lock;	/* serialises prepare/unprepare against ESD recovery */
+	unsigned int esd_recoveries;
 
 	bool prepared;
 };
@@ -148,12 +155,17 @@ static int nt36523_prepare(struct drm_panel *panel)
 	struct nt36523 *ctx = to_nt36523(panel);
 	int ret;
 
-	if (ctx->prepared)
+	mutex_lock(&ctx->lock);
+	if (ctx->prepared) {
+		mutex_unlock(&ctx->lock);
 		return 0;
+	}
 
 	ret = nt36523_power_on(ctx);
-	if (ret < 0)
+	if (ret < 0) {
+		mutex_unlock(&ctx->lock);
 		return ret;
+	}
 
 	ctx->dsi[0]->mode_flags |= MIPI_DSI_MODE_LPM;
 	ctx->dsi[1]->mode_flags |= MIPI_DSI_MODE_LPM;
@@ -169,10 +181,12 @@ static int nt36523_prepare(struct drm_panel *panel)
 	msleep(20);
 
 	ctx->prepared = true;
+	mutex_unlock(&ctx->lock);
 	return 0;
 
 err:
 	nt36523_power_off(ctx);
+	mutex_unlock(&ctx->lock);
 	return ret;
 }
 
@@ -180,8 +194,12 @@ static int nt36523_unprepare(struct drm_panel *panel)
 {
 	struct nt36523 *ctx = to_nt36523(panel);
 
-	if (!ctx->prepared)
+	cancel_work_sync(&ctx->esd_work);
+	mutex_lock(&ctx->lock);
+	if (!ctx->prepared) {
+		mutex_unlock(&ctx->lock);
 		return 0;
+	}
 
 	ctx->dsi[0]->mode_flags &= ~MIPI_DSI_MODE_LPM;
 	ctx->dsi[1]->mode_flags &= ~MIPI_DSI_MODE_LPM;
@@ -194,6 +212,7 @@ static int nt36523_unprepare(struct drm_panel *panel)
 	nt36523_power_off(ctx);
 
 	ctx->prepared = false;
+	mutex_unlock(&ctx->lock);
 	return 0;
 }
 
@@ -221,6 +240,71 @@ static const struct drm_panel_funcs nt36523_funcs = {
 	.unprepare	= nt36523_unprepare,
 	.get_modes	= nt36523_get_modes,
 };
+
+/*
+ * ESD handling, from the downstream panel node:
+ *   samsung,esd-irq-gpio1 = <&tlmm 66 0>  (qcom,...,irq-trigger1 = "rising")
+ *   samsung,ub-con-det    = <&tlmm 46 0>
+ * Both are pull-less inputs: a rising edge means the panel lost its state, so
+ * the only recovery the vendor performs is power cycle plus init replay.
+ */
+static void nt36523_esd_work(struct work_struct *work)
+{
+	struct nt36523 *ctx = container_of(work, struct nt36523, esd_work);
+	int ret;
+
+	mutex_lock(&ctx->lock);
+	if (!ctx->prepared) {
+		mutex_unlock(&ctx->lock);
+		return;
+	}
+
+	dev_warn(ctx->panel.dev, "ESD detected, recovering\n");
+
+	nt36523_power_off(ctx);
+	ret = nt36523_power_on(ctx);
+	if (!ret)
+		ret = nt36523_send_init_sequence(ctx);
+	if (ret) {
+		dev_err(ctx->panel.dev, "ESD recovery failed: %d\n", ret);
+		ctx->prepared = false;
+	} else {
+		ctx->esd_recoveries++;
+		dev_info(ctx->panel.dev, "ESD recovery %u complete\n", ctx->esd_recoveries);
+	}
+
+	mutex_unlock(&ctx->lock);
+}
+
+static irqreturn_t nt36523_esd_irq(int irq, void *data)
+{
+	struct nt36523 *ctx = data;
+
+	schedule_work(&ctx->esd_work);
+
+	return IRQ_HANDLED;
+}
+
+static int nt36523_request_esd_irq(struct nt36523 *ctx, struct gpio_desc *gpio,
+				   const char *name)
+{
+	int irq, ret;
+
+	if (!gpio)
+		return 0;
+
+	irq = gpiod_to_irq(gpio);
+	if (irq < 0)
+		return dev_err_probe(ctx->panel.dev, irq, "%s has no interrupt\n", name);
+
+	ret = devm_request_threaded_irq(ctx->panel.dev, irq, NULL, nt36523_esd_irq,
+					IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+					dev_name(ctx->panel.dev), ctx);
+	if (ret)
+		return dev_err_probe(ctx->panel.dev, ret, "failed to request %s\n", name);
+
+	return 0;
+}
 
 /*
  * Brightness uses the vendor DCS path: long write 0x51 with two data bytes,
@@ -321,12 +405,36 @@ static int nt36523_probe(struct mipi_dsi_device *dsi)
 		goto err_unreg;
 	}
 
+	mutex_init(&ctx->lock);
+	INIT_WORK(&ctx->esd_work, nt36523_esd_work);
+
+	/* Optional: without the property there is no ESD detection. */
+	ctx->esd_gpio = devm_gpiod_get_optional(dev, "esd", GPIOD_IN);
+	if (IS_ERR(ctx->esd_gpio)) {
+		ret = dev_err_probe(dev, PTR_ERR(ctx->esd_gpio), "failed to get esd gpio\n");
+		goto err_unreg;
+	}
+
+	ctx->ub_con_det_gpio = devm_gpiod_get_optional(dev, "ub-con-det", GPIOD_IN);
+	if (IS_ERR(ctx->ub_con_det_gpio)) {
+		ret = dev_err_probe(dev, PTR_ERR(ctx->ub_con_det_gpio),
+				    "failed to get ub-con-det gpio\n");
+		goto err_unreg;
+	}
+
 	ctx->backlight = nt36523_register_backlight(ctx);
 	if (IS_ERR(ctx->backlight)) {
 		ret = dev_err_probe(dev, PTR_ERR(ctx->backlight),
 				    "failed to register backlight\n");
 		goto err_unreg;
 	}
+
+	ret = nt36523_request_esd_irq(ctx, ctx->esd_gpio, "esd");
+	if (ret)
+		goto err_unreg;
+	ret = nt36523_request_esd_irq(ctx, ctx->ub_con_det_gpio, "ub-con-det");
+	if (ret)
+		goto err_unreg;
 
 	drm_panel_init(&ctx->panel, dev, &nt36523_funcs, DRM_MODE_CONNECTOR_DSI);
 	drm_panel_add(&ctx->panel);
@@ -361,6 +469,9 @@ err_unreg:
 static void nt36523_remove(struct mipi_dsi_device *dsi)
 {
 	struct nt36523 *ctx = mipi_dsi_get_drvdata(dsi);
+
+	cancel_work_sync(&ctx->esd_work);
+	mutex_destroy(&ctx->lock);
 
 	if (ctx->dsi[0])
 		mipi_dsi_detach(ctx->dsi[0]);

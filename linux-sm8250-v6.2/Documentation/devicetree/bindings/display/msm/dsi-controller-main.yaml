@@ -66,6 +66,18 @@ properties:
       Indicates if the DSI controller is driving a panel which needs
       2 DSI links.
 
+  qcom,master-dsi:
+    type: boolean
+    description: |
+      Marks this controller as the master link of a bonded dual-DSI pair. The
+      master drives the shared clock and sends every DCS command to both links.
+
+  qcom,sync-dual-dsi:
+    type: boolean
+    description: |
+      Requires the two bonded controllers to stay in sync. Enables the driver's
+      sync command path, use it when a panel tears between the two halves.
+
   assigned-clocks:
     maxItems: 2
     description: |

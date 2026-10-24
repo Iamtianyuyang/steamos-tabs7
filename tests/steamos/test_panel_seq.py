@@ -108,6 +108,35 @@ class GeneratedHeaderTest(unittest.TestCase):
         for key in ('vddio-supply', 'buck-supply', 'reset-gpios'):
             self.assertIn(key, binding)
 
+    def test_bonded_dual_dsi_is_declared(self):
+        dts = (KERNEL / 'arch/arm64/boot/dts/qcom/sm8250-samsung-gts7-common.dtsi').read_text()
+        dsi0 = dts[dts.index('&dsi0 {'):]
+        dsi0 = dsi0[:dsi0.index('\n};')]
+        dsi1 = dts[dts.index('&dsi1 {'):]
+        dsi1 = dsi1[:dsi1.index('\n};')]
+        self.assertIn('qcom,dual-dsi-mode;', dsi0)
+        self.assertIn('qcom,master-dsi;', dsi0)
+        self.assertIn('qcom,dual-dsi-mode;', dsi1)
+        self.assertNotIn('qcom,master-dsi;', dsi1, 'only one link can be the master')
+        self.assertNotIn('qcom,sync-dual-dsi;', dts,
+                         'sync mode is the fallback if the halves tear; do not enable it blindly')
+
+    def test_esd_inputs_are_wired_and_handled(self):
+        dts = (KERNEL / 'arch/arm64/boot/dts/qcom/sm8250-samsung-gts7-common.dtsi').read_text()
+        self.assertIn('esd-gpios = <&tlmm 66 GPIO_ACTIVE_HIGH>;', dts)
+        self.assertIn('ub-con-det-gpios = <&tlmm 46 GPIO_ACTIVE_HIGH>;', dts)
+        self.assertIn('IRQF_TRIGGER_RISING', self.driver, 'vendor uses the rising edge')
+        self.assertIn('nt36523_esd_work', self.driver)
+        self.assertIn('cancel_work_sync(&ctx->esd_work)', self.driver)
+        self.assertIn('devm_gpiod_get_optional(dev, "esd"', self.driver)
+
+    def test_esd_recovery_replays_power_and_init(self):
+        work = self.driver[self.driver.index('static void nt36523_esd_work'):]
+        work = work[:work.index('\n}\n')]
+        self.assertLess(work.index('nt36523_power_off(ctx)'), work.index('nt36523_power_on(ctx)'))
+        self.assertIn('nt36523_send_init_sequence(ctx)', work)
+        self.assertIn('if (!ctx->prepared)', work, 'recover only while the panel is on')
+
     def test_sleep_out_and_display_on_are_not_sent_twice(self):
         self.assertNotIn('mipi_dsi_dcs_exit_sleep_mode', self.driver)
         self.assertNotIn('mipi_dsi_dcs_set_display_on', self.driver)

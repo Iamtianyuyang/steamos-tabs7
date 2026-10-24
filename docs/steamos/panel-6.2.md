@@ -140,10 +140,52 @@ scripts/steamos/emit-panel-seq.py --check   # 头文件是否与 JSON 同步
 绑定文档 `samsung,gts7l-nt36523.yaml` 记录了 `reset-gpios`、两路 supply 与双 DSI 端口。
 
 编译结果：`Image 5656e8e2…`、`Image.gz ad8d24c3…`、DTB `92c514cd…`。
+加入 ESD 与 bonding 后：`Image 7e716e7c…`、`Image.gz 81217567…`、DTB `11858ec2…`。
+
+## Bonded DSI 与双 VIG 的对应关系（2026-10-24）
+
+厂商拓扑是 `qcom,display-topology = <2 0 2>`：**两个 DSI 接口并联驱动一块面板**，
+每条链路 800 宽。主线要表达同一件事必须显式声明 bonding，否则两条 DSI 会被当成
+两块独立面板。DTS 已补：
+
+```dts
+&dsi0 { qcom,dual-dsi-mode; qcom,master-dsi; };   /* 主链路，共用时钟，命令下发到两侧 */
+&dsi1 { qcom,dual-dsi-mode; };
+```
+
+对应的驱动行为（`dsi_manager.c` / `dsi_host.c`）：`is_bonded_dsi` 为真时
+`hdisplay/htotal/hsync_*` 全部减半（每链路回到 800 + 84/2/30），DCS 命令只发一次就
+同时驱动两条链路。`qcom,sync-dual-dsi` 没有打开——它是"两半画面撕裂"时的备选，
+打开会走同步命令路径，需要真机证据才能确定，代码里刻意保持关闭并有测试守着。
+
+**双 VIG** 在主线是 DPU 的 split display：一个 CRTC → `dpu_encoder_virt` →
+两个 `dpu_encoder_phys_vid`（`ENC_ROLE_MASTER` / `ENC_ROLE_SLAVE`）→ `INTF0`/`INTF1`
+→ DSI0/DSI1，每半各自绑一组 LM + SSPP（VIG）。这与厂商 `65,86` 那对 VIG 平面是同一
+件事的两种表达，但主线的平面/混频器分配由 catalog 自动完成（`sm8250_vig_sblk_0..3`
+已在 6.2 中），不靠用户态补丁强行指定。
+
+要点：4.19 上 wlroots 的 `WLR_DRM_SM_T870_SPLIT=65,86` 是**用户空间补丁**绕开厂商
+DPU 的限制；6.2 主线应当在 DPU 内部完成拆分，wlroots/gamescope 只需按普通双链路
+面板处理。这一点必须先点亮才能证实，不能预先宣称。
+
+## ESD（2026-10-24）
+
+厂商用两根无上下拉的输入做面板状态检测：`esd-irq-gpio1` = tlmm66（上升沿）、
+`ub-con-det` = tlmm46。驱动现在按可选属性 `esd-gpios` / `ub-con-det-gpios` 申请
+线程化 IRQ（上升沿），触发后进入 `nt36523_esd_work()`：
+
+1. 只在 `prepared` 状态下恢复（否则忽略）；
+2. 断电 → 重新上电（含厂商的 10 ms 升压与四相复位）→ 重放 359 条初始化序列；
+3. 失败则标记未准备并报错，成功则累加 `esd_recoveries` 并打日志。
+
+`prepare`/`unprepare` 与 ESD 恢复共用一把 mutex，`unprepare`/`remove` 会
+`cancel_work_sync()`，避免恢复流程与下电交叉。
 
 ## 仍未完成
 
 - 面板节点仍是 `disabled`：点亮前要先在真机确认 C-PHY 锁定与初始化序列；
-- 双 VIG 在 `msm`/DPU 上的平面绑定未验证，`65,86` 组合需要在 6.2 上重新求；
-- ESD 中断（tlmm66 上升沿）与 UB con det（tlmm46）还没接，厂商靠它做面板状态检查；
+- `qcom,sync-dual-dsi` 是否需要打开，要看真机上两半是否撕裂；
+- ESD 的 pinctrl（厂商是 8 mA/2 mA、input-enable、bias-disable）还没搬过来，
+  主线目前靠 TLMM 默认配置，可能出现误触发；
+- 双 VIG 的 DPU split 分配需要在点亮后用 `dmesg`/帧内容确认左右半屏对应关系；
 - 全部参数只是与厂商源码一致，**没有一项在真机点亮过**。
