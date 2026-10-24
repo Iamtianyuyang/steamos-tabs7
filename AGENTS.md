@@ -29,6 +29,11 @@
   remains unverified on hardware.
 - Use project skills `device-tree`, `cross-gcc`, `device-drivers`, and
   `kernel-debugging` when applicable.
+- **Never let a single command block longer than two minutes.** Long waits are not
+  observably reliable here (output is lost), so poll in short invocations with
+  `scripts/device/wait-for-device.py` (hard cap 120 s) and split flashing, builds
+  and log collection into <=2 minute steps. Only a genuinely necessary, explicitly
+  justified step may exceed that.
 - Prefer codebase-memory MCP for code discovery; run `index_repository` for the
   directory you need (indexes are rebuilt on demand after the 0.12 upgrade; no
   index is kept by default). DTS, Kconfig, logs, and other literal configuration

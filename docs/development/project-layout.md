@@ -23,10 +23,10 @@
 | `scripts/build/bluetooth/` | HCI 内核变体构建与核验 |
 | `scripts/steamos/` | rootfs 抓取/盘点、Steam 客户端与 systemd 适配安装、IPC 内核核验、面板参数提取（`extract-panel-profile.py`）与初始化序列生成（`emit-panel-seq.py`） |
 | `scripts/build/mainline/` | 主线 6.2 内核/DTB/initramfs 构建、SteamOS 与显示配置层（`build-steamos-6.2.sh`）、6.2 BOOT 候选（`build-steamos-6.2-boot.py`）与产物核验 |
-| `scripts/device/` | 只读设备采集与原厂固件分析 |
+| `scripts/device/` | 只读设备采集、原厂固件分析、双系统镜像整备（`prepare-dual-boot.py`）与有界设备轮询（`wait-for-device.py`） |
 | `scripts/recovery/` | Recovery 封装、AVB 工具调用与写入前核验 |
 | `scripts/setup/` | 主机工具准备与下载校验 |
-| `tools/device/` | 独立设备分析工具；`read-super-lp.py` 只分析已复制的普通文件 |
+| `tools/device/` | 独立设备分析工具；`read-super-lp.py` 只分析已复制的普通文件；`switch-boot.sh` 在 recovery 内切换 Android/Linux |
 | `tests/steamos/` | rootfs 盘点、客户端安装、systemd 适配、内核配置与蓝牙变体回归 |
 | `tests/hardware/bluetooth/` | 蓝牙 rfkill 与休眠时钟交接测试 |
 | `linux-sm8250-v6.2/` | 目标内核（主线 6.2）：DTS 入口 `arch/arm64/boot/dts/qcom/sm8250-samsung-gts7lwifi.dts`，构建脚本在 `scripts/build/mainline/` |

@@ -56,6 +56,25 @@ def display(path):
         return str(path)
 
 
+def normalise_arm64_header(image, reference):
+    """Copy the informational arm64 header fields the Samsung LK insists on.
+
+    Mainline sets text_offset to 0 and leaves res3 empty; the vendor 4.19 image
+    the bootloader accepted carries text_offset=0x80000 and res3=0xecefecef.
+    Both fields are ignored by the kernel since 5.9, but LK refuses to boot an
+    image without them, so mirror the reference values.
+    """
+    data = bytearray(image)
+    text_offset = struct.unpack_from('<Q', reference, 8)[0]
+    res3 = reference[0x28:0x30]
+    struct.pack_into('<Q', data, 8, text_offset)
+    data[0x28:0x30] = res3
+    if struct.unpack_from('<I', data, 0x38)[0] != 0x644d5241:
+        raise ValueError('arm64 magic damaged while normalising the header')
+    return bytes(data), {'text_offset': text_offset,
+                         'res3': struct.unpack('<Q', res3)[0]}
+
+
 def kernel_version(image_bytes):
     marker = image_bytes.find(b'Linux version ')
     if marker < 0:
@@ -110,16 +129,21 @@ def main():
     kernel = Path(args.kernel).resolve()
     dtb = Path(args.dtb).resolve()
     ramdisk = Path(args.ramdisk).resolve()
-    version = kernel_version(kernel.read_bytes())
+    reference_kernel = (output / 'template' / 'kernel').read_bytes()
+    kernel_data, header_fields = normalise_arm64_header(kernel.read_bytes(), reference_kernel)
+    version = kernel_version(kernel_data)
     if '6.2' not in version.split()[2]:
         raise ValueError(f'kernel is not 6.2: {version}')
     if b'samsung,gts7l-nt36523' not in dtb.read_bytes():
         raise ValueError('DTB does not contain the NT36523 panel node')
     staged = {'kernel': output / kernel.name, 'dtb': output / dtb.name,
               'ramdisk': output / ramdisk.name}
-    for component in (kernel, dtb, ramdisk):
-        (output / component.name).write_bytes(component.read_bytes())
+    staged['kernel'].write_bytes(kernel_data)
+    (output / dtb.name).write_bytes(dtb.read_bytes())
+    (output / ramdisk.name).write_bytes(ramdisk.read_bytes())
     print(f'kernel   : {version}')
+    print(f'header   : text_offset=0x{header_fields["text_offset"]:x} '
+          f'res3=0x{header_fields["res3"]:x} (copied from the deployed kernel)')
     print(f'dtb      : {display(dtb)} (panel node present)')
 
     options['--kernel'] = str(output / kernel.name)
@@ -136,8 +160,10 @@ def main():
             continue
         if rebuilt.get(name) != value:
             raise ValueError(f'boot header/command line changed: {name}')
-    for name, expected in (('kernel', kernel), ('dtb', dtb), ('ramdisk', ramdisk)):
-        if (output / 'rebuilt' / name).read_bytes() != expected.read_bytes():
+    expected_components = {'kernel': staged['kernel'].read_bytes(),
+                           'dtb': dtb.read_bytes(), 'ramdisk': ramdisk.read_bytes()}
+    for name, expected in expected_components.items():
+        if (output / 'rebuilt' / name).read_bytes() != expected:
             raise ValueError(f'repacked component changed: {name}')
 
     capacity = profile['device_pit']['partitions']['BOOT']['capacity_bytes']
@@ -173,6 +199,7 @@ def main():
                      'partitions': {name: file_sha(checked['paths'][name]) for name in PARTITIONS}},
         'components': components,
         'kernel_version': version,
+        'arm64_header': header_fields,
         'header_and_commandline_preserved': True,
         'hardware_boot_observed': False,
         'device_write_performed': False,
