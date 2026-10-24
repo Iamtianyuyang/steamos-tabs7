@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild the native Linux initramfs with the SteamOS boot-target switch.
+"""Rebuild the native Linux initramfs with the SteamOS hand-over helper.
 
 Reuses the pinned static BusyBox and deterministic newc writer of
 build-vendor-linux.py, then compares every archive entry against the ramdisk

@@ -87,28 +87,23 @@ dmesg > /run/usb-dmesg.txt
 if ! telnetd -b 192.168.77.2 -l /bin/sh; then
     echo 'Vendor Linux telnetd failed; serial shell remains available' > /dev/kmsg
 fi
-if [ -x /sbin/start-persistent-gui ] && /sbin/start-persistent-gui select-steamos; then
-    # SteamOS systemd becomes PID 1. Its own units recreate USB debug access;
-    # the RNDIS gadget and usb0 address persist in the kernel.
-    echo 'Vendor Linux switching root to SteamOS systemd' > /dev/kmsg
-    echo '' > /proc/sys/kernel/hotplug
-    /bin/busybox killall telnetd
-    mkdir -p /newroot/var/log/tabs7linux-initramfs
-    for record in /run/*.txt /run/*.log; do
-        [ -f "$record" ] && cat "$record" > "/newroot/var/log/tabs7linux-initramfs/${record##*/}"
-    done
-    sync
-    mount -o move /sys /newroot/sys
-    mount -o move /proc /newroot/proc
-    exec /bin/busybox switch_root /newroot /usr/lib/systemd/systemd
-fi
 if [ -x /sbin/start-persistent-gui ]; then
     if /sbin/start-persistent-gui; then
-        # Ubuntu udev now owns hotplug and permissions; don't race it with mdev.
+        # SteamOS systemd becomes PID 1. Its own units recreate USB debug access;
+        # the RNDIS gadget and usb0 address persist in the kernel.
+        echo 'Vendor Linux switching root to SteamOS systemd' > /dev/kmsg
         echo '' > /proc/sys/kernel/hotplug
-    else
-        echo 'Persistent GUI unavailable; native USB shells remain active' > /dev/kmsg
+        /bin/busybox killall telnetd
+        mkdir -p /newroot/var/log/tabs7linux-initramfs
+        for record in /run/*.txt /run/*.log; do
+            [ -f "$record" ] && cat "$record" > "/newroot/var/log/tabs7linux-initramfs/${record##*/}"
+        done
+        sync
+        mount -o move /sys /newroot/sys
+        mount -o move /proc /newroot/proc
+        exec /bin/busybox switch_root /newroot /usr/lib/systemd/systemd
     fi
+    echo 'SteamOS bootstrap failed; native USB shells remain active' > /dev/kmsg
 fi
 while :; do
     if [ -c /dev/ttyGS0 ]; then

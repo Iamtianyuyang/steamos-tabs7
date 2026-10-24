@@ -99,6 +99,7 @@ def main():
     subprocess.run(avb + ['add_hash_footer', '--image', str(signed), '--partition_size', str(len(original)),
                          '--partition_name', 'boot', '--algorithm', 'SHA256_RSA4096', '--key', str(key),
                          '--rollback_index', str(rollback), '--rollback_index_location', str(location),
+                         # Pinned: reproduces the deployed BOOT image; do not reword.
                          '--salt', digest(b'tabs7linux steamos boot-target initramfs'),
                          '--prop', 'com.tabs7linux.boot.kind:native-vendor-linux-steamos-selector'], check=True)
     subprocess.run(avb + ['verify_image', '--image', str(signed), '--key', str(key)], check=True)

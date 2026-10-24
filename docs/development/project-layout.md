@@ -12,7 +12,7 @@
 | `hardware/samsung/gts7lwifi/devicetree/` | `drafts/` 保存历史草稿，`vendor/` 保存下游参考，`overlays/` 保存启动 overlay |
 | `hardware/samsung/gts7lwifi/kernel/` | 厂商 4.19 补丁与配置；`configs/steamos-ipc.config`、`configs/steamos-systemd.config` 是 SteamOS 内核变体 |
 | `hardware/samsung/gts7lwifi/profiles/` | 设备身份、固件布局、保留区和蓝牙 ABI 的核对资料 |
-| `boot/initramfs/` | 下游原生启动的 `/init` 与持久化启动入口；`start-persistent-gui` 负责校验 userdata 并把引导目标切到 SteamOS 树 |
+| `boot/initramfs/` | 下游原生启动的 `/init`；`start-persistent-gui` 校验 userdata 与 SteamOS 树并把根切到 `tabs7linux/steamos`（无 Ubuntu 出口） |
 | `userspace/steamos/` | SteamOS 会话入口（`session.sh`、`gamescope-session`、`steam-client.sh`、`sway.conf`）、`systemd/` 单元与 `patches/`（gamescope 双 VIG、Mesa KGSL WSI） |
 | `userspace/platform/` | 会话共用的宿主服务与配方：`bluetooth/`、`network/`、`gpu/`（Turnip/Zink 构建与 KGSL 规则）、背光、runtime、wlroots 双 VIG 补丁 |
 | `userspace/services/` | 独立于会话的网络校时配置与服务 |

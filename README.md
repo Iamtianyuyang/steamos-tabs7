@@ -6,8 +6,9 @@
 
 当前状态：SteamOS rootfs 已在真机解出并校验，Steam 客户端已安装、**大屏登录页
 已在平板上显示**，私有 Turnip 已在 Adreno 650 上全屏绘制 Vulkan 场景，Steam 内
-触摸（Xwayland 直连）已实测可用。**独立 Game Mode（gamescope 自持 KMS）、
-Steam Input 设备节点与游戏启动仍在适配**。完整进度、边界与证据见
+触摸（Xwayland 直连）已实测可用，原生 initramfs 已固定切到 SteamOS 树。
+**独立 Game Mode（gamescope 自持 KMS）、Steam Input 设备节点与游戏启动仍在
+适配**。完整进度、边界与证据见
 [SteamOS 移植文档](docs/steamos/README.md)。
 
 GNOME/Phosh/XFCE 桌面线已从仓库移除。**主线 6.2 至今没有真机启动记录**：
@@ -86,9 +87,11 @@ SteamOS 需要的内核变体已在这条 4.19 链上逐项部署：HCI socket �
 `scripts/steamos/verify-ipc-kernel.py`。切到 6.2 后这些配置项要按主线 Kconfig
 重新映射。
 
-`boot/initramfs/start-persistent-gui` 校验 userdata 分区（PARTNAME/F2FS UUID）
-后，按 `tabs7linux/boot-target` 指定的目标把根切到 SteamOS 树；每次 RAM 启动
-重新校验 marker，不依赖上次运行留下的状态。
+`boot/initramfs/start-persistent-gui` 校验 userdata 分区（PARTNAME/F2FS UUID）后，
+校验 `tabs7linux/steamos` 树（`os-release`、适配标记、systemd），bind 到 `/newroot`、
+挂上 devtmpfs，再 `switch_root` 到 SteamOS systemd。**启动目标不再可选**：没有
+Ubuntu 出口，也不需要 `boot-target` 文件。校验失败时停在前台 RAM 环境，USB RNDIS/
+ACM 与 telnet shell 仍可用，日志在 `/run/steamos-bootstrap.log`。
 
 ## 设备备份与写入前检查
 

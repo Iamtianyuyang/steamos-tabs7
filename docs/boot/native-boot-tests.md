@@ -177,7 +177,7 @@ Recovery 分区现在安装此镜像，重新进入 Recovery 可启动 RAM Linux
   重建的 H4 模块加载，`hci0` 就绪。
 - vbmeta 未写：设备 vbmeta 已是 `flags=3`。TWRP 包附带的 vbmeta 没有使用。
 - TWRP：ADB 显示 `product:twrp_gts7lwifi`，能挂载 userdata（f2fs）并看到
-  `tabs7linux/ubuntu` 与其中的 SteamOS 树。**不要在 TWRP 中 Format Data**，会清除全部
+  `tabs7linux/ubuntu` 与其中的 SteamOS 树（SteamOS 树后来已迁到 `tabs7linux/steamos`）。**不要在 TWRP 中 Format Data**，会清除全部
   Linux/SteamOS 数据。
 - 从 TWRP 回系统用 `adb shell twrp reboot`；实测 `adb reboot` 会再次进入 Recovery
   （命令行 `androidboot.boot_recovery=1`，misc BCB 为空）。

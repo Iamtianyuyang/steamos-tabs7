@@ -27,7 +27,10 @@ REQUIRED_CONFIG = [
     'USB_CONFIGFS_RNDIS', 'USB_CONFIGFS_ACM', 'USB_DWC3', 'USB_DWC3_MSM',
 ]
 APPLETS = 'sh mount mkdir echo sleep ls head ln ifconfig telnetd setsid dmesg cat ip reboot poweroff uname mdev mknod chmod stat readlink awk grep sed dd sync rm date'.split()
+# Applets the helper calls as `busybox <applet>`; the first one has no symlink in
+# the archive, so it is verified against the binary only.
 PERSISTENT_GUI_APPLETS = ['chroot', 'umount', 'od', 'tr', 'id']
+PERSISTENT_GUI_INLINE_APPLETS = ['mv']
 
 
 def sha(data):
@@ -87,7 +90,7 @@ def unpack(mktools, image, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--with-persistent-gui', action='store_true',
-                        help='include the guarded userdata rootfs helper; init controls invocation')
+                        help='include the SteamOS hand-over helper; init always invokes it')
     parser.add_argument('--standard-drm-client', action='store_true',
                         help='disable downstream custom-client DRM behavior for standard compositors')
     args = parser.parse_args()
@@ -142,7 +145,8 @@ def main():
     if any(struct.unpack_from('<I', busybox, phoff + i * phsize)[0] == 3 for i in range(phcount)):
         raise ValueError('BusyBox unexpectedly needs a dynamic interpreter')
     applets = APPLETS + (PERSISTENT_GUI_APPLETS if args.with_persistent_gui else [])
-    for applet in applets:
+    inline = PERSISTENT_GUI_INLINE_APPLETS if args.with_persistent_gui else []
+    for applet in applets + inline:
         if b'\0' + applet.encode() + b'\0' not in busybox:
             raise ValueError(f'Expected BusyBox applet name absent: {applet}')
     init = (ROOT / 'boot/initramfs/init-vendor-linux').read_bytes()
@@ -240,7 +244,7 @@ def main():
         'persistent_gui_helper_sha256': sha(persistent_gui) if persistent_gui is not None else None,
         'usb': {'functions': ['RNDIS', 'ACM'], 'tablet': '192.168.77.2/24',
                 'host': '192.168.77.1/24', 'vendor_product': '1d6b:0104'},
-        'storage': ('RAM bootstrap; helper mounts only validated userdata/tabs7linux/ubuntu when invoked'
+        'storage': ('RAM bootstrap; the helper validates userdata and hands the root to the SteamOS tree tabs7linux/steamos'
                     if args.with_persistent_gui else 'RAM-only; Android system/vendor/userdata are not mounted'),
         'pstore': 'mounted early; existing files preserved',
         'validation': 'offline header/component/static ELF/cpio/AVB signature and hash checks',

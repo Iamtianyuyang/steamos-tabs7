@@ -1,26 +1,19 @@
 #!/bin/sh
-# Called after native USB shells are available. Errors return to the caller.
+# Hand the running initramfs over to the SteamOS tree on userdata.
+#
+# Called by /init as root with the USB/telnet shells already up. Success means
+# /newroot holds a validated SteamOS root (bind mount plus a real devtmpfs) and
+# the caller performs switch_root. Any failure returns to the caller, which
+# keeps the RAM shells, so nothing here may leave userdata mounted on error.
 set -eu
 
 BB=/bin/busybox
 DATA_MOUNT=/mnt/native-data
-GUI_ROOT=/linux
-ROOT_RELATIVE=tabs7linux/ubuntu
 DATA_UUID=c53f40a0-a139-40d3-bac7-333aae100724
 DATA_UUID_HEX=c53f40a0a13940d3bac7333aae100724
-EXPECTED_MARKER='TABS7LINUX_ROOTFS=1
-MODEL=SM-T870
-ARCH=arm64
-DISTRO=ubuntu-24.04
-ROOTFS_RELATIVE_PATH=tabs7linux/ubuntu
-USERDATA_UUID=c53f40a0-a139-40d3-bac7-333aae100724
-BASE_ARCHIVE_SHA256=a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2'
-
-# SteamOS lives beside Ubuntu until Ubuntu is removed. A boot-target file
-# selects it: "steamos-once" is consumed before switching (a forced restart
-# then returns to Ubuntu), "steamos" persists. Anything else means Ubuntu.
-STEAMOS_RELATIVE=$ROOT_RELATIVE/steamos
-BOOT_TARGET_RELATIVE=tabs7linux/boot-target
+STEAMOS_RELATIVE=tabs7linux/steamos
+# Earlier builds kept the tree beside an Ubuntu rootfs; adopt it once, in place.
+LEGACY_STEAMOS_RELATIVE=tabs7linux/ubuntu/steamos
 STEAMOS_MARKER='TABS7LINUX_STEAMOS_ADAPTATION=1
 MODEL=SM-T870
 ARCH=arm64
@@ -29,14 +22,14 @@ NEW_ROOT=/newroot
 
 mode=${1:-start}
 case "$mode" in
-    --print-marker) printf '%s\n' "$EXPECTED_MARKER"; exit 0 ;;
+    --print-marker) printf '%s\n' "$STEAMOS_MARKER"; exit 0 ;;
     start|select-steamos) ;;
-    *) printf 'Usage: %s [start|select-steamos|--print-marker]\n' "$0" >&2; exit 2 ;;
+    *) printf 'Usage: %s [start|--print-marker]\n' "$0" >&2; exit 2 ;;
 esac
 
 "$BB" mkdir -p /run
-exec >> /run/gui-bootstrap.log 2>&1
-printf '\nPersistent GUI bootstrap: %s\n' "$("$BB" date -u)"
+exec >> /run/steamos-bootstrap.log 2>&1
+printf '\nSteamOS bootstrap: %s\n' "$("$BB" date -u)"
 
 # The vendor kernel defaults to the performance cpufreq governor, which pins
 # every CPU at max clock and overheats the tablet within hours. schedutil is
@@ -48,26 +41,16 @@ for governor in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
     fi
 done
 new_mounts=
-trace_instance=
 
-finish_display_trace() {
-    [ -n "$trace_instance" ] || return 0
-    printf '0\n' > "$trace_instance/tracing_on"
-    printf '0\n' > "$trace_instance/events/enable"
-    "$BB" cat "$trace_instance/trace" > /run/gui-boot-clock-trace.txt
-    trace_instance=
-}
-
-fail() { printf 'Persistent GUI unavailable: %s; native USB shells remain active\n' "$*"; exit 1; }
+fail() { printf 'SteamOS unavailable: %s; native USB shells remain active\n' "$*"; exit 1; }
 on_exit() {
     bootstrap_status=$?
     trap - 0
-    finish_display_trace || true
     if [ "$bootstrap_status" -ne 0 ]; then
         for created_mount in $new_mounts; do
             "$BB" umount "$created_mount" || printf 'Mount retained for diagnosis: %s\n' "$created_mount"
         done
-        printf 'Bootstrap exited %s; inspect /run/gui-bootstrap.log and /run/gui/\n' "$bootstrap_status"
+        printf 'Bootstrap exited %s; inspect /run/steamos-bootstrap.log\n' "$bootstrap_status"
     fi
     exit "$bootstrap_status"
 }
@@ -83,20 +66,17 @@ mount_new() {
     "$BB" mount "$@" "$destination" || fail "mount failed at $destination"
     new_mounts="$destination $new_mounts"
 }
-same_directory() { [ "$("$BB" stat -c '%d:%i' "$1")" = "$("$BB" stat -c '%d:%i' "$2")" ]; }
-bind_directory() {
-    source_directory=$1
-    target_directory=$2
-    [ -d "$source_directory" ] || fail "missing native directory $source_directory"
-    [ "$("$BB" readlink -f "$target_directory")" = "$target_directory" ] || fail "bind target contains a symlink: $target_directory"
-    "$BB" mkdir -p "$target_directory"
-    if is_mounted "$target_directory"; then
-        same_directory "$source_directory" "$target_directory" || fail "unexpected mount at $target_directory"
-    else
-        mount_new "$target_directory" -o bind "$source_directory"
-    fi
-}
 read_hex() { "$BB" od -An -tx1 -j "$2" -N "$3" "$1" | "$BB" tr -d ' \n'; }
+is_steamos_tree() {
+    tree=$1
+    [ -d "$tree" ] || return 1
+    [ "$("$BB" readlink -f "$tree")" = "$tree" ] || return 1
+    "$BB" grep -qx 'ID=steamos' "$tree/usr/lib/os-release" 2>/dev/null || return 1
+    marker=$tree/etc/tabs7linux/steamos-adaptation
+    [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+    [ "$("$BB" cat "$marker")" = "$STEAMOS_MARKER" ] || return 1
+    [ -x "$tree/usr/lib/systemd/systemd" ] || return 1
+}
 
 [ "$("$BB" id -u)" -eq 0 ] || fail 'UID 0 is required'
 [ -r /proc/mounts ] && [ -d /sys/class/block ] || fail '/proc and /sys are required'
@@ -130,7 +110,7 @@ for superblock_offset in 1024 5120; do
 done
 printf 'Verified %s: PARTNAME=userdata, F2FS, UUID=%s\n' "$userdata_device" "$DATA_UUID"
 
-"$BB" mkdir -p "$DATA_MOUNT" "$GUI_ROOT"
+"$BB" mkdir -p "$DATA_MOUNT"
 if is_mounted "$DATA_MOUNT"; then
     mounted_source=$("$BB" awk -v point="$DATA_MOUNT" '$2 == point {print $1}' /proc/mounts)
     [ "$("$BB" readlink -f "$mounted_source")" = "$("$BB" readlink -f "$userdata_device")" ] || fail 'userdata mount belongs to another device'
@@ -139,104 +119,23 @@ else
     mount_new "$DATA_MOUNT" -t f2fs -o rw,noatime "$userdata_device"
 fi
 
-persistent_root=$DATA_MOUNT/$ROOT_RELATIVE
-[ -d "$persistent_root" ] || fail 'the project Ubuntu rootfs is absent'
-[ "$("$BB" readlink -f "$persistent_root")" = "$persistent_root" ] || fail 'rootfs path contains a symlink'
-rootfs_marker=$persistent_root/.tabs7linux-rootfs
-[ -f "$rootfs_marker" ] && [ ! -L "$rootfs_marker" ] || fail 'rootfs marker is absent or a symlink'
-[ "$("$BB" stat -c %s "$rootfs_marker")" -lt 1024 ] || fail 'rootfs marker is unexpectedly large'
-[ "$("$BB" cat "$rootfs_marker")" = "$EXPECTED_MARKER" ] || fail 'rootfs manifest marker mismatch'
-
-if [ "$mode" = select-steamos ]; then
-    # Exit 3 = stay on Ubuntu. on_exit then releases the userdata mount and
-    # the normal start mounts it again with all of its own checks.
-    no_steamos() { printf 'SteamOS not selected: %s\n' "$*"; exit 3; }
-    boot_target=$DATA_MOUNT/$BOOT_TARGET_RELATIVE
-    [ -e "$boot_target" ] || no_steamos 'no boot-target file'
-    [ -f "$boot_target" ] && [ ! -L "$boot_target" ] || no_steamos 'boot-target is not a regular file'
-    [ "$("$BB" stat -c %s "$boot_target")" -lt 64 ] || no_steamos 'boot-target is unexpectedly large'
-    target=$("$BB" cat "$boot_target")
-    case "$target" in steamos|steamos-once) ;; *) no_steamos "boot-target is '$target'" ;; esac
-    steamos_root=$DATA_MOUNT/$STEAMOS_RELATIVE
-    [ -d "$steamos_root" ] || no_steamos 'SteamOS tree is absent'
-    [ "$("$BB" readlink -f "$steamos_root")" = "$steamos_root" ] || no_steamos 'SteamOS path contains a symlink'
-    "$BB" grep -qx 'ID=steamos' "$steamos_root/usr/lib/os-release" || no_steamos 'not a SteamOS tree'
-    steamos_marker=$steamos_root/etc/tabs7linux/steamos-adaptation
-    [ -f "$steamos_marker" ] && [ ! -L "$steamos_marker" ] || no_steamos 'adaptation marker is absent'
-    [ "$("$BB" cat "$steamos_marker")" = "$STEAMOS_MARKER" ] || no_steamos 'adaptation marker mismatch'
-    [ -x "$steamos_root/usr/lib/systemd/systemd" ] || no_steamos 'systemd is missing'
-    # Consume a one-shot request before anything can hang.
-    if [ "$target" = steamos-once ]; then
-        "$BB" mv -f "$boot_target" "$boot_target.consumed" || no_steamos 'cannot consume boot-target'
-    fi
-    "$BB" sync
-    "$BB" mkdir -p "$NEW_ROOT"
-    is_mounted "$NEW_ROOT" && fail "$NEW_ROOT is already mounted"
-    mount_new "$NEW_ROOT" -o bind "$steamos_root"
-    # systemd needs a real devtmpfs; the bootstrap /dev is a static tmpfs.
-    mount_new "$NEW_ROOT/dev" -t devtmpfs -o mode=0755,nosuid devtmpfs
-    printf 'SteamOS selected (%s): %s prepared at %s\n' "$target" "$steamos_root" "$NEW_ROOT"
-    trap - 0
-    finish_display_trace || true
-    exit 0
-fi
-[ -x "$persistent_root/usr/local/lib/tabs7linux/gui/start-xfce.sh" ] || fail 'the installed desktop launcher is missing'
-[ -f "$persistent_root/usr/local/lib/tabs7linux/gui/sway.conf" ] || fail 'the installed Sway configuration is missing'
-
-# The vendor RTC may start in 2019. Preserve newer time; otherwise use the
-# installation timestamp stored in our own rootfs, never an executable value.
-epoch_file=$persistent_root/etc/tabs7linux/build-epoch
-if [ -f "$epoch_file" ] && [ ! -L "$epoch_file" ]; then
-    build_epoch=$("$BB" cat "$epoch_file")
-    case "$build_epoch" in
-        ''|*[!0-9]*) printf 'Ignoring invalid build timestamp\n' ;;
-        *)
-            if [ "${#build_epoch}" -ge 10 ] && [ "${#build_epoch}" -le 11 ] &&
-               [ "$("$BB" date +%s)" -lt "$build_epoch" ]; then
-                "$BB" date -u -s "@$build_epoch"
-            fi
-            ;;
-    esac
-fi
-launcher_target=$("$BB" readlink -f "$persistent_root/usr/local/lib/tabs7linux/gui/start-xfce.sh")
-case "$launcher_target" in "$persistent_root"/*) ;; *) fail 'desktop launcher escapes the project rootfs' ;; esac
-
-if is_mounted "$GUI_ROOT"; then
-    same_directory "$persistent_root" "$GUI_ROOT" || fail '/linux contains another rootfs'
-else
-    [ -z "$("$BB" ls -A "$GUI_ROOT")" ] || fail '/linux is not empty'
-    mount_new "$GUI_ROOT" -o bind "$persistent_root"
-fi
-
-# Child mounts must be explicit: a plain bind of /dev omits its submounts.
-"$BB" mkdir -p /dev/shm
-if ! is_mounted /dev/shm; then mount_new /dev/shm -t tmpfs -o mode=1777,nosuid,nodev shm; fi
-bind_directory /dev "$GUI_ROOT/dev"
-bind_directory /dev/pts "$GUI_ROOT/dev/pts"
-bind_directory /dev/shm "$GUI_ROOT/dev/shm"
-bind_directory /sys "$GUI_ROOT/sys"
-bind_directory /run "$GUI_ROOT/run"
-[ "$("$BB" readlink -f "$GUI_ROOT/proc")" = "$GUI_ROOT/proc" ] || fail 'rootfs /proc contains a symlink'
-"$BB" mkdir -p "$GUI_ROOT/proc"
-if is_mounted "$GUI_ROOT/proc"; then
-    "$BB" awk -v point="$GUI_ROOT/proc" '$2 == point && $3 == "proc" {ok=1} END {exit !ok}' /proc/mounts || fail 'rootfs /proc has an unexpected filesystem'
-else
-    mount_new "$GUI_ROOT/proc" -t proc -o nosuid,nodev,noexec proc
-fi
-
-if [ -f "$GUI_ROOT/etc/tabs7linux/trace-display" ]; then
-    "$BB" mkdir -p /run/trace
-    if is_mounted /run/trace || "$BB" mount -t tracefs tracefs /run/trace; then
-        "$BB" mkdir -p /run/trace/instances/tabs7-gui-boot
-        trace_instance=/run/trace/instances/tabs7-gui-boot
-        printf '64\n' > "$trace_instance/buffer_size_kb"
-        printf '%s\n' 'name ~ "*dsi*" || name ~ "*byte*" || name ~ "*pclk*" || name ~ "*mdp*"' > "$trace_instance/events/clk/clk_set_rate/filter"
-        printf '1\n' > "$trace_instance/events/clk/clk_set_rate/enable"
-        printf '1\n' > "$trace_instance/events/clk/clk_set_parent/enable"
-        printf '1\n' > "$trace_instance/events/sde/sde_encoder_underrun/enable"
-        printf '1\n' > "$trace_instance/tracing_on"
+steamos_root=$DATA_MOUNT/$STEAMOS_RELATIVE
+if [ ! -e "$steamos_root" ]; then
+    legacy_root=$DATA_MOUNT/$LEGACY_STEAMOS_RELATIVE
+    if is_steamos_tree "$legacy_root"; then
+        # Same filesystem: this is an atomic directory rename, not a copy.
+        "$BB" mv "$legacy_root" "$steamos_root" || fail "cannot move $LEGACY_STEAMOS_RELATIVE to $STEAMOS_RELATIVE"
+        printf 'Adopted the SteamOS tree from %s\n' "$LEGACY_STEAMOS_RELATIVE"
     fi
 fi
-printf 'Project rootfs mounted at /linux; starting desktop launcher\n'
-"$BB" chroot "$GUI_ROOT" /usr/local/lib/tabs7linux/gui/start-xfce.sh start || fail 'desktop launcher returned an error'
-printf 'Desktop startup checks passed; verify the screen using /run/gui logs\n'
+is_steamos_tree "$steamos_root" || fail "no validated SteamOS tree at $STEAMOS_RELATIVE (os-release, adaptation marker or systemd missing)"
+printf 'Validated SteamOS tree: %s\n' "$steamos_root"
+
+"$BB" mkdir -p "$NEW_ROOT"
+is_mounted "$NEW_ROOT" && fail "$NEW_ROOT is already mounted"
+mount_new "$NEW_ROOT" -o bind "$steamos_root"
+# systemd needs a real devtmpfs; the bootstrap /dev is a static tmpfs.
+mount_new "$NEW_ROOT/dev" -t devtmpfs -o mode=0755,nosuid devtmpfs
+printf 'SteamOS root prepared at %s\n' "$NEW_ROOT"
+trap - 0
+exit 0

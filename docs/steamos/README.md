@@ -213,12 +213,14 @@ BOOT 中的 initramfs 由 [build-steamos-initramfs.py](../../scripts/build/vendo
 重建（与旧 ramdisk 逐项比对，只有 `init` 与 `sbin/start-persistent-gui` 改变；后者同时带入已提交
 但此前未部署的 schedutil 调速器设置），由 [update-linux-boot.py](../../scripts/build/vendor/update-linux-boot.py)
 做 ramdisk-only 更新（布局检查：DTBO=Lineage、RECOVERY=TWRP、vbmeta flags=3）。BOOT 读回
-`f65cde70…`；无标志文件时日志为 "SteamOS not selected"，Ubuntu 照常启动。
+`f65cde70…`；当时未带标志文件时日志为 "SteamOS not selected"，Ubuntu 照常启动。
 
-选择方式：userdata 上 `tabs7linux/boot-target` 写 `steamos-once`（切换前改名为
-`.consumed`，强制重启即回 Ubuntu）或 `steamos`（持久）。initramfs 校验 SteamOS 树、
-适配标记与 systemd 后 bind 到 `/newroot`，挂 devtmpfs，迁移 /proc、/sys，
-`switch_root` 到 `/usr/lib/systemd/systemd`。
+> **启动目标已固定为 SteamOS（2026-10-24 后续）**：`boot-target` 选择机制与
+> Ubuntu 出口一起删除。`start-persistent-gui` 现在只做一件事：校验 userdata 与
+> `tabs7linux/steamos` 树，bind 到 `/newroot`、挂 devtmpfs，然后 `switch_root`
+> 到 systemd。旧路径 `tabs7linux/ubuntu/steamos` 会被一次性原子重命名到
+> `tabs7linux/steamos`；校验失败则停在前台 RAM 环境（USB RNDIS/ACM、telnet）并写
+> `/run/steamos-bootstrap.log`。
 
 适配由 [install-systemd-adaptation.py](../../scripts/steamos/install-systemd-adaptation.py)
 安装（每个改动备份并记录，`--uninstall` 精确还原；测试见
