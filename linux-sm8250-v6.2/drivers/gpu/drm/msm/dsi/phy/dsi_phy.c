@@ -597,6 +597,54 @@ static int dsi_phy_get_id(struct msm_dsi_phy *phy)
 	return -EINVAL;
 }
 
+static const struct {
+	const char *name;
+	u32 bit;
+	size_t offset;
+} dsi_phy_cphy_override_props[] = {
+	{ "qcom,cphy-vreg-ctrl-0", MSM_DSI_PHY_CPHY_OVERRIDE_VREG_CTRL_0,
+	  offsetof(struct msm_dsi_phy_cphy_override, vreg_ctrl_0) },
+	{ "qcom,cphy-cmn-ctrl-2", MSM_DSI_PHY_CPHY_OVERRIDE_CMN_CTRL_2,
+	  offsetof(struct msm_dsi_phy_cphy_override, cmn_ctrl_2) },
+	{ "qcom,cphy-rescode-offset-top", MSM_DSI_PHY_CPHY_OVERRIDE_RESCODE_OFFSET_TOP,
+	  offsetof(struct msm_dsi_phy_cphy_override, rescode_offset_top) },
+	{ "qcom,cphy-rescode-offset-bot", MSM_DSI_PHY_CPHY_OVERRIDE_RESCODE_OFFSET_BOT,
+	  offsetof(struct msm_dsi_phy_cphy_override, rescode_offset_bot) },
+	{ "qcom,cphy-rescode-offset-mid", MSM_DSI_PHY_CPHY_OVERRIDE_RESCODE_OFFSET_MID,
+	  offsetof(struct msm_dsi_phy_cphy_override, rescode_offset_mid) },
+	{ "qcom,cphy-str-swi-cal-sel", MSM_DSI_PHY_CPHY_OVERRIDE_STR_SWI_CAL_SEL,
+	  offsetof(struct msm_dsi_phy_cphy_override, str_swi_cal_sel) },
+};
+
+/*
+ * C-PHY register overrides are applied by the PHY driver after its own
+ * defaults, in the order the downstream enable path uses. A missing property
+ * leaves the SoC default in place, so boards that do not need tuning are
+ * unaffected.
+ */
+static void dsi_phy_parse_cphy_overrides(struct msm_dsi_phy *phy)
+{
+	struct msm_dsi_phy_cphy_override *override = &phy->cphy_override;
+	struct device_node *np = phy->pdev->dev.of_node;
+	int i;
+
+	if (!phy->cphy_mode)
+		return;
+
+	for (i = 0; i < ARRAY_SIZE(dsi_phy_cphy_override_props); i++) {
+		u32 value;
+
+		if (of_property_read_u32(np, dsi_phy_cphy_override_props[i].name, &value))
+			continue;
+
+		*(u32 *)((void *)override + dsi_phy_cphy_override_props[i].offset) = value;
+		override->mask |= dsi_phy_cphy_override_props[i].bit;
+	}
+
+	if (override->mask)
+		dev_dbg(&phy->pdev->dev, "C-PHY overrides 0x%x\n", override->mask);
+}
+
 static int dsi_phy_driver_probe(struct platform_device *pdev)
 {
 	struct msm_dsi_phy *phy;
@@ -631,6 +679,7 @@ static int dsi_phy_driver_probe(struct platform_device *pdev)
 				"qcom,dsi-phy-regulator-ldo-mode");
 	if (!of_property_read_u32(dev->of_node, "phy-type", &phy_type))
 		phy->cphy_mode = (phy_type == PHY_TYPE_CPHY);
+	dsi_phy_parse_cphy_overrides(phy);
 
 	phy->base = msm_ioremap_size(pdev, "dsi_phy", &phy->base_size);
 	if (IS_ERR(phy->base))

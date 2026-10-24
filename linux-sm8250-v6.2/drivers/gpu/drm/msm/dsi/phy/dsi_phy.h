@@ -87,6 +87,29 @@ struct msm_dsi_dphy_timing {
 
 #define DSI_LANE_MAX			5
 
+/*
+ * Optional C-PHY register overrides for panels that need PHY values different
+ * from the SoC defaults. The downstream SM-T870 driver exposes the same values
+ * as samsung,phy_vreg_ctrl_0, samsung,phy_ctrl2,
+ * samsung,phy_offset_{top,mid,bot}_ctrl and samsung,phy_str_swi_cal_sel_ctrl.
+ */
+struct msm_dsi_phy_cphy_override {
+	u32 mask;
+	u32 vreg_ctrl_0;
+	u32 cmn_ctrl_2;
+	u32 rescode_offset_top;
+	u32 rescode_offset_bot;
+	u32 rescode_offset_mid;
+	u32 str_swi_cal_sel;
+};
+
+#define MSM_DSI_PHY_CPHY_OVERRIDE_VREG_CTRL_0		BIT(0)
+#define MSM_DSI_PHY_CPHY_OVERRIDE_CMN_CTRL_2		BIT(1)
+#define MSM_DSI_PHY_CPHY_OVERRIDE_RESCODE_OFFSET_TOP	BIT(2)
+#define MSM_DSI_PHY_CPHY_OVERRIDE_RESCODE_OFFSET_BOT	BIT(3)
+#define MSM_DSI_PHY_CPHY_OVERRIDE_RESCODE_OFFSET_MID	BIT(4)
+#define MSM_DSI_PHY_CPHY_OVERRIDE_STR_SWI_CAL_SEL	BIT(5)
+
 struct msm_dsi_phy {
 	struct platform_device *pdev;
 	void __iomem *base;
@@ -109,6 +132,7 @@ struct msm_dsi_phy {
 	enum msm_dsi_phy_usecase usecase;
 	bool regulator_ldo_mode;
 	bool cphy_mode;
+	struct msm_dsi_phy_cphy_override cphy_override;
 
 	struct clk_hw *vco_hw;
 	bool pll_on;

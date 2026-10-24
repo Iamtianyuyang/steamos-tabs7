@@ -813,6 +813,44 @@ static void dsi_phy_hw_v4_0_lane_settings(struct msm_dsi_phy *phy)
 	}
 }
 
+/*
+ * Apply panel-specific C-PHY register overrides.
+ *
+ * The downstream SM-T870 driver (dsi_phy_hw_v4_0.c:dsi_phy_hw_cphy_enable())
+ * lets a panel replace the clamped registers after the SoC defaults are
+ * programmed: VREG_CTRL_0, CMN_CTRL_2, the three GLBL_RESCODE_OFFSET_CTRL
+ * values and GLBL_STR_SWI_CAL_SEL_CTRL. Values come from the panel profile in
+ * hardware/samsung/gts7lwifi/panel/; boards without the properties keep the
+ * defaults.
+ */
+static void dsi_phy_7nm_apply_cphy_overrides(struct msm_dsi_phy *phy,
+					     void __iomem *base)
+{
+	const struct msm_dsi_phy_cphy_override *override = &phy->cphy_override;
+
+	if (!phy->cphy_mode || !override->mask)
+		return;
+
+	if (override->mask & MSM_DSI_PHY_CPHY_OVERRIDE_VREG_CTRL_0)
+		dsi_phy_write(base + REG_DSI_7nm_PHY_CMN_VREG_CTRL_0,
+			      override->vreg_ctrl_0);
+	if (override->mask & MSM_DSI_PHY_CPHY_OVERRIDE_RESCODE_OFFSET_TOP)
+		dsi_phy_write(base + REG_DSI_7nm_PHY_CMN_GLBL_RESCODE_OFFSET_TOP_CTRL,
+			      override->rescode_offset_top);
+	if (override->mask & MSM_DSI_PHY_CPHY_OVERRIDE_RESCODE_OFFSET_BOT)
+		dsi_phy_write(base + REG_DSI_7nm_PHY_CMN_GLBL_RESCODE_OFFSET_BOT_CTRL,
+			      override->rescode_offset_bot);
+	if (override->mask & MSM_DSI_PHY_CPHY_OVERRIDE_RESCODE_OFFSET_MID)
+		dsi_phy_write(base + REG_DSI_7nm_PHY_CMN_GLBL_RESCODE_OFFSET_MID_CTRL,
+			      override->rescode_offset_mid);
+	if (override->mask & MSM_DSI_PHY_CPHY_OVERRIDE_STR_SWI_CAL_SEL)
+		dsi_phy_write(base + REG_DSI_7nm_PHY_CMN_GLBL_STR_SWI_CAL_SEL_CTRL,
+			      override->str_swi_cal_sel);
+	if (override->mask & MSM_DSI_PHY_CPHY_OVERRIDE_CMN_CTRL_2)
+		dsi_phy_write(base + REG_DSI_7nm_PHY_CMN_CTRL_2,
+			      override->cmn_ctrl_2);
+}
+
 static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
 			      struct msm_dsi_phy_clk_request *clk_req)
 {
@@ -853,7 +891,11 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
 		return -EINVAL;
 	}
 
-	/* TODO: CPHY enable path (this is for DPHY only) */
+	/*
+	 * C-PHY is handled below: GLBL_CTRL bit 6, PEMPH_CTRL_1, the C-PHY timing
+	 * register set and the cphy timing calculation. Panel-specific register
+	 * overrides are applied by dsi_phy_7nm_apply_cphy_overrides().
+	 */
 
 	/* Alter PHY configurations if data rate less than 1.5GHZ*/
 	less_than_1500_mhz = (clk_req->bitclk_rate <= 1500000000);
@@ -943,6 +985,8 @@ static int dsi_7nm_phy_enable(struct msm_dsi_phy *phy,
 	/* Select full-rate mode */
 	if (!phy->cphy_mode)
 		dsi_phy_write(base + REG_DSI_7nm_PHY_CMN_CTRL_2, 0x40);
+
+	dsi_phy_7nm_apply_cphy_overrides(phy, base);
 
 	ret = dsi_7nm_set_usecase(phy);
 	if (ret) {

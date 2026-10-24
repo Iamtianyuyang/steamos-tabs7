@@ -45,11 +45,11 @@
 
 | # | 差距 | 现状 | 后果 |
 | --- | --- | --- | --- |
-| 1 | **C-PHY** | `dsi_phy_7nm.c` 有 `cphy_mode` 分支和 C-PHY PLL 计算，但使能路径仍写着 `/* TODO: CPHY enable path (this is for DPHY only) */` | 面板用的是 C-PHY，D-PHY 的使能序列不会生效 |
-| 2 | **PHY 调优** | 主线的 msm DSI PHY 没有"每面板覆盖寄存器"的机制，厂商值（0x50/0x64/0x1F/0x04）无处安放 | 即使 C-PHY 通了，PHY 也可能锁不住/误码 |
+| 1 | ~~**C-PHY**~~ | 复查后确认 `dsi_phy_7nm.c` 的 C-PHY 路径其实**已经完整**（`GLBL_CTRL` bit 6、`PEMPH_CTRL_1`、C-PHY 时序寄存器组、cphy 时序计算都在），那句 `TODO: CPHY enable path` 是过时注释，已替换为准确说明 | 无需新写使能路径；先前评估过重，这里更正 |
+| 2 | ~~**PHY 调优**~~（已实现，未上真机） | 主线的 msm DSI PHY 没有"每面板覆盖寄存器"的机制。已在 `dsi_phy.c` 解析 6 个可选 DT 属性、在 `dsi_phy_7nm.c` 的 C-PHY 使能末尾应用，并在绑定里补文档；项目 DTS 的 `dsi0_phy`/`dsi1_phy` 已按提取值写入 | 值来自厂商，行为仍需真机验证 |
 | 3 | **初始化序列** | 主线驱动 2 条占位 vs 厂商 359 条 | 面板不会亮 |
 | 4 | **时序** | 主线 2560×1600@60、HFP96/HSW16/HBP64；厂商 800×2560@120、HFP84/HSW2/HBP30 | 模式与面板不匹配，可能直接黑屏 |
-| 5 | **lane 数与 PHY 模式** | DTS `data-lanes = <0 1 2 3>`（4 lane D-PHY）；厂商 3 lane C-PHY | 组合非法 |
+| 5 | ~~**lane 数与 PHY 模式**~~（已改） | DTS 现在两条 DSI 都是 `data-lanes = <0 1 2>`，两个 PHY 都带 `phy-type = <11>`（C-PHY，`PHY_TYPE_CPHY` 来自 `dt-bindings/phy/phy.h`） | 与厂商的 3 trio C-PHY 一致 |
 | 6 | **每链路宽度** | 主线注释写"每条 DSI 送完整 2560"；厂商是每条 800（=1600/2） | 双 DSI 拆分方式错误 |
 | 7 | **物理尺寸** | 主线 220×138 mm；厂商 148×236 mm | 仅影响 DPI/触摸标定 |
 | 8 | **vddio 供电** | TODO | 面板 IO 无电源 |
@@ -72,3 +72,27 @@
 以上没有一项在真机上验证过。面板 JSON 里的数值是厂商 4.19 驱动的属性，可以当作
 "目标值"，但不能当作"6.2 已验证"。在这块面板点亮之前，6.2 的 BOOT 不应覆盖当前
 可用的 4.19 BOOT（`37f5aa13…`）。
+
+## 已落地（2026-10-24，仅供编译验证）
+
+- `dsi_phy.c`：新增 6 个可选属性的解析（`qcom,cphy-vreg-ctrl-0`、
+  `qcom,cphy-cmn-ctrl-2`、`qcom,cphy-rescode-offset-{top,bot,mid}`、
+  `qcom,cphy-str-swi-cal-sel`），只在 C-PHY 模式下收集，缺省时保留 SoC 默认值。
+- `dsi_phy_7nm.c`：新增 `dsi_phy_7nm_apply_cphy_overrides()`，在 `CMN_CTRL_0=0x7f`
+  与 full-rate 选择之后按下游顺序写回这些寄存器；过时的 C-PHY TODO 注释已替换。
+- `Documentation/.../dsi-phy-7nm.yaml`：补上 6 个属性的说明。
+- DTS：两个 PHY 改为 C-PHY + 厂商调优值，两条 DSI 端点改为 3 trio。
+- `hardware/.../configs/steamos-display-6.2.config`：新增显示层配置（DRM、MSM、DPU、
+  DSI、7nm PHY、NT36523 面板、backlight），`build-steamos-6.2.sh` 支持追加
+  fragment 层：
+
+```sh
+scripts/build/mainline/build-steamos-6.2.sh image \
+    hardware/samsung/gts7lwifi/kernel/configs/steamos-display-6.2.config
+```
+
+产物（`out/steamos-kernel-6.2/`）：`Image a7ed1b5e…`、`Image.gz 9da9095d…`、
+DTB `e91c2afd…`，130 项请求全部保留。**编译通过不等于能点亮**：面板的 `on_cmds`
+仍是占位、时序仍是估算值、`vddio-supply` 仍是 TODO、面板节点仍 `disabled`。
+`tests/steamos/test_dsi_phy_cphy_tuning.py` 会把 DTS 里的调优值和提取出的面板 JSON
+逐一比对，防止两边漂移。

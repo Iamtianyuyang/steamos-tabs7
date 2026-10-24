@@ -10,6 +10,8 @@ SteamOS 的目标内核是主线 6.2（`linux-sm8250-v6.2/`）。**6.2 至今没
 scripts/build/mainline/build-steamos-6.2.sh config   # 只验证配置
 scripts/build/mainline/build-steamos-6.2.sh dtb      # DTB
 scripts/build/mainline/build-steamos-6.2.sh image    # DTB + Image/Image.gz（默认）
+scripts/build/mainline/build-steamos-6.2.sh image \
+    hardware/samsung/gts7lwifi/kernel/configs/steamos-display-6.2.config  # 追加显示层
 ```
 
 脚本把 `hardware/samsung/gts7lwifi/kernel/configs/gts7lwifi-bringup.config` 与

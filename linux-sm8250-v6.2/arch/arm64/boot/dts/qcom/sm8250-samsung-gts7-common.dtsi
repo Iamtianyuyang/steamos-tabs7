@@ -562,15 +562,29 @@
 		port@1 {
 			dsi0_out: endpoint {
 				remote-endpoint = <&panel_in0>;
-				data-lanes = <0 1 2 3>;
+				/* 3 trios: the panel profile says C-PHY, not D-PHY */
+				data-lanes = <0 1 2>;
 			};
 		};
 	};
 };
 
+/*
+ * C-PHY tuning overrides: values from the downstream 4.19 panel driver,
+ * extracted into hardware/samsung/gts7lwifi/panel/nt36523-ppa957db1.json
+ * (samsung,phy_vreg_ctrl_0, phy_ctrl2, phy_offset_*_ctrl,
+ * phy_str_swi_cal_sel_ctrl).
+ */
 &dsi0_phy {
 	status = "disabled";
 	vdds-supply = <&vreg_l5a_0p88>;
+	phy-type = <11>;
+	qcom,cphy-vreg-ctrl-0 = <0x50>;
+	qcom,cphy-cmn-ctrl-2 = <0x64>;
+	qcom,cphy-rescode-offset-top = <0x1f>;
+	qcom,cphy-rescode-offset-bot = <0x1f>;
+	qcom,cphy-rescode-offset-mid = <0x1f>;
+	qcom,cphy-str-swi-cal-sel = <0x04>;
 };
 
 &dsi1 {
@@ -584,7 +598,7 @@
 		port@1 {
 			dsi1_out: endpoint {
 				remote-endpoint = <&panel_in1>;
-				data-lanes = <0 1 2 3>;
+				data-lanes = <0 1 2>;
 			};
 		};
 	};
@@ -594,6 +608,13 @@
 &dsi1_phy {
 	status = "disabled";
 	vdds-supply = <&vreg_l5a_0p88>;
+	phy-type = <11>;
+	qcom,cphy-vreg-ctrl-0 = <0x50>;
+	qcom,cphy-cmn-ctrl-2 = <0x64>;
+	qcom,cphy-rescode-offset-top = <0x1f>;
+	qcom,cphy-rescode-offset-bot = <0x1f>;
+	qcom,cphy-rescode-offset-mid = <0x1f>;
+	qcom,cphy-str-swi-cal-sel = <0x04>;
 };
 
 /*

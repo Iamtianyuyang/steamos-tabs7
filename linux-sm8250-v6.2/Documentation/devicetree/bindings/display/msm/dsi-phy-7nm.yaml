@@ -40,6 +40,33 @@ properties:
     enum: [ 10, 11 ]
     default: 10
 
+  qcom,cphy-vreg-ctrl-0:
+    description:
+      Override for the CMN_VREG_CTRL_0 register in C-PHY mode. Some panels
+      (for example Samsung AMS parts) need a value different from the SoC
+      default; without the property the default is used.
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  qcom,cphy-cmn-ctrl-2:
+    description: Override for the CMN_CTRL_2 register in C-PHY mode.
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  qcom,cphy-rescode-offset-top:
+    description: Override for GLBL_RESCODE_OFFSET_TOP_CTRL in C-PHY mode.
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  qcom,cphy-rescode-offset-bot:
+    description: Override for GLBL_RESCODE_OFFSET_BOT_CTRL in C-PHY mode.
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  qcom,cphy-rescode-offset-mid:
+    description: Override for GLBL_RESCODE_OFFSET_MID_CTRL in C-PHY mode.
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  qcom,cphy-str-swi-cal-sel:
+    description: Override for GLBL_STR_SWI_CAL_SEL_CTRL in C-PHY mode.
+    $ref: /schemas/types.yaml#/definitions/uint32
+
 required:
   - compatible
   - reg
