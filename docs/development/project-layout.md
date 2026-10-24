@@ -12,6 +12,7 @@
 | `hardware/samsung/gts7lwifi/devicetree/` | `drafts/` 保存历史草稿，`vendor/` 保存下游参考，`overlays/` 保存启动 overlay |
 | `hardware/samsung/gts7lwifi/kernel/` | 厂商 4.19 补丁与配置；`configs/steamos-ipc.config`、`configs/steamos-systemd.config` 是 SteamOS 内核变体 |
 | `hardware/samsung/gts7lwifi/profiles/` | 设备身份、固件布局、保留区和蓝牙 ABI 的核对资料 |
+| `hardware/samsung/gts7lwifi/panel/` | 从厂商源码提取的面板权威参数（时序、链路、初始化序列、PHY 调优） |
 | `boot/initramfs/` | 下游原生启动的 `/init`；`start-persistent-gui` 校验 userdata 与 SteamOS 树并把根切到 `tabs7linux/steamos`（无 Ubuntu 出口） |
 | `userspace/steamos/` | SteamOS 会话入口（`session.sh`、`gamescope-session`、`steam-client.sh`、`sway.conf`）、`systemd/` 单元与 `patches/`（gamescope 双 VIG、Mesa KGSL WSI） |
 | `userspace/platform/` | 会话共用的宿主服务与配方：`bluetooth/`、`network/`、`gpu/`（Turnip/Zink 构建与 KGSL 规则）、背光、runtime、wlroots 双 VIG 补丁 |
@@ -20,7 +21,7 @@
 | `scripts/build/steamos/` | 在 SteamOS 树内编译 gamescope 与 Turnip WSI |
 | `scripts/build/vendor/` | 厂商内核镜像、SteamOS initramfs、BOOT 更新与写盘前预检（`preflight-steamos-boot.py`） |
 | `scripts/build/bluetooth/` | HCI 内核变体构建与核验 |
-| `scripts/steamos/` | rootfs 抓取/盘点、Steam 客户端与 systemd 适配安装、IPC 内核核验 |
+| `scripts/steamos/` | rootfs 抓取/盘点、Steam 客户端与 systemd 适配安装、IPC 内核核验、面板参数提取（`extract-panel-profile.py`） |
 | `scripts/build/mainline/` | 主线 6.2 内核、DTB、initramfs 构建、SteamOS 配置层（`build-steamos-6.2.sh`）与产物核验 |
 | `scripts/device/` | 只读设备采集与原厂固件分析 |
 | `scripts/recovery/` | Recovery 封装、AVB 工具调用与写入前核验 |

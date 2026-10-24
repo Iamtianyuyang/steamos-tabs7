@@ -59,7 +59,9 @@ scripts/build/mainline/build-steamos-6.2.sh image    # DTB + Image/Image.gz（�
    仍然按 F2FS 双超级块 magic 与 UUID 校验。2026-10-24 在 4.19 上验证了回退分支
    （日志为 `userdata matched by PARTNAME`）；**partlabel 分支要等 6.2 首次启动才会第一次
    真正执行**，因此在 6.2 上这条路径属于未验证代码。
-2. **显示**：6.2 主线没有这块面板的驱动，也没有验证过双 VIG 在 `msm`/DPU 上的平面布局。
+2. **显示**：面板参数、6.2 树里已有的部分、C-PHY/时序/初始化序列的九项差距和按依赖排的
+   工作顺序见[面板与双 VIG 评估](panel-6.2.md)。结论是 6.2 的 DPU 与 DSI 框架都在，
+   但 C-PHY 使能路径、每面板 PHY 调优、359 条初始化序列、时序与 lane 组合都还没对上。
 3. **GPU 用户空间**：Turnip-KGSL 链路在 6.2 上不成立，需要重建 freedreno/Turnip(mSM) +
    gamescope 的构建与库布局，`userspace/steamos/gamescope-session` 里的
    `TABS7_ZINK_KGSL=1`、`mesa-zink-gnome-x11` 前缀都要改写。
