@@ -223,6 +223,12 @@ BOOT 中的 initramfs 由 [build-steamos-initramfs.py](../../scripts/build/vendo
 > `/run/steamos-bootstrap.log`（成功时该日志会复制到
 > `/newroot/var/log/tabs7linux-initramfs/`）。迁移后 `tabs7linux/ubuntu` 里只剩
 > 旧 Ubuntu 根文件系统，确认 SteamOS 能启动后再从 RAM shell 里手工删除。
+>
+> 写 BOOT 前跑 [preflight-steamos-boot.py](../../scripts/build/vendor/preflight-steamos-boot.py)：
+> 它校验同一次启动的四分区快照（manifest 哈希、PIT 容量、DTBO/RECOVERY 布局、实时 DTB、
+> board-id/msm-id）、已部署 BOOT 的 AVB 签名与 header v2，然后用该 BOOT 的 ramdisk 重建
+> initramfs（只允许 `init` 与 `sbin/start-persistent-gui` 变化）并只替换 ramdisk 重打包，
+> 把新的 BOOT、`preflight.json` 和回滚镜像写到 `out/`。全程不访问设备。
 
 适配由 [install-systemd-adaptation.py](../../scripts/steamos/install-systemd-adaptation.py)
 安装（每个改动备份并记录，`--uninstall` 精确还原；测试见

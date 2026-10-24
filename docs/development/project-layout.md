@@ -18,7 +18,7 @@
 | `userspace/services/` | 独立于会话的网络校时配置与服务 |
 | `userspace/native/` | 原生 C helper：`display/`（DRM 扫描输出对照）、`gpu/`（Vulkan/EGL smoke） |
 | `scripts/build/steamos/` | 在 SteamOS 树内编译 gamescope 与 Turnip WSI |
-| `scripts/build/vendor/` | 厂商内核镜像、SteamOS initramfs 与 boot 更新 |
+| `scripts/build/vendor/` | 厂商内核镜像、SteamOS initramfs、BOOT 更新与写盘前预检（`preflight-steamos-boot.py`） |
 | `scripts/build/bluetooth/` | HCI 内核变体构建与核验 |
 | `scripts/steamos/` | rootfs 抓取/盘点、Steam 客户端与 systemd 适配安装、IPC 内核核验 |
 | `scripts/build/mainline/` | 主线 6.2 内核、DTB、initramfs 构建与产物核验 |

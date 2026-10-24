@@ -87,6 +87,18 @@ SteamOS 需要的内核变体已在这条 4.19 链上逐项部署：HCI socket �
 `scripts/steamos/verify-ipc-kernel.py`。切到 6.2 后这些配置项要按主线 Kconfig
 重新映射。
 
+写 BOOT 前用一条命令串起全部离线预检（分区快照、布局、身份、AVB、initramfs 逐项比对、
+只换 ramdisk 的重建）：
+
+```sh
+python3 scripts/build/vendor/preflight-steamos-boot.py \
+    --deployed-boot out/steamos/steamos-selector-boot/boot.img \
+    --output out/steamos/boot-preflight-$(date +%Y%m%d-%H%M%S)
+```
+
+它不接触设备；产物（新的 `boot.img`、`preflight.json`、回滚用的 `backup-view/`）都在
+ignored `out/`，写盘与读回比对仍需单独授权。
+
 `boot/initramfs/start-persistent-gui` 校验 userdata 分区（PARTNAME/F2FS UUID）后，
 校验 `tabs7linux/steamos` 树（`os-release`、适配标记、systemd），bind 到 `/newroot`、
 挂上 devtmpfs，再 `switch_root` 到 SteamOS systemd。**启动目标不再可选**：没有
