@@ -187,3 +187,34 @@ Recovery 分区现在安装此镜像，重新进入 Recovery 可启动 RAM Linux
 - 回退：同次启动的原厂 BOOT/DTBO 与原 Linux RECOVERY 读回位于
   `out/steamos/native-preflash2/`（BOOT `f555ff2b…`、DTBO `790870ac…`、
   RECOVERY `7b5ec545…`），可用 samloader 写回。
+
+## SteamOS-only initramfs 真机结果（2026-10-24）
+
+`start-persistent-gui` 去掉 Ubuntu 出口与 `boot-target` 选择后，BOOT 由
+[preflight-steamos-boot.py](../../scripts/build/vendor/preflight-steamos-boot.py)
+一条命令生成：同一次启动的四分区快照（`out/steamos/native-preflash3`）、
+DTBO/RECOVERY 布局、实时 DTB、`board-id [8,7]`/`msm-id [356,131073]`、已部署
+BOOT（`f65cde70…`）的 AVB 签名、header v2、从该 BOOT 解出的 ramdisk 逐项比对
+（只有 `init` 与 `sbin/start-persistent-gui` 变化，其余 47 项相同）。
+
+- 写入：Download mode 由设备上的 `/usr/local/bin/tabs7-reboot-download`
+  （`tools/device/reboot-download.c` 在 SteamOS 内用 gcc 编译）触发，
+  `samloader flash --partition BOOT` 写 71,303,168 字节，一次成功。
+- 分区读回（SteamOS 内 `sha256sum /dev/sda22`）：
+  **`0eb66dea364d6da6de049123c1974f3d931e53da07736a6c322f64f48884dba8`**，与生成的
+  `out/steamos/boot-preflight-20261024-143134/boot/boot.img` 一致；DTBO
+  `9383ef37…`、RECOVERY `68214dc9…`、VBMETA `c92f5f6a…` 未变。
+- 启动日志（`/var/log/tabs7linux-initramfs/steamos-bootstrap.log`）：
+  `Verified /dev/sda35: PARTNAME=userdata, F2FS, UUID=…` →
+  `Adopted the SteamOS tree from tabs7linux/ubuntu/steamos` →
+  `Validated SteamOS tree: /mnt/native-data/tabs7linux/steamos` →
+  `SteamOS root prepared at /newroot`。旧路径的树由一次原子重命名搬到
+  `tabs7linux/steamos`，由新 initramfs 自己校验后才 `switch_root`。
+- 启动后：PID 1 为 systemd，主机名 `frame`，SteamOS 0.5.3；`dbus-broker`、
+  NetworkManager、seatd、logind、bluetooth 运行，`tabs7-gamescope-session.service`
+  为 enabled/active，`/etc/tabs7linux/sm-t870-split` 为 `65,86`。
+  `systemctl --failed` 只有 `proc-sys-fs-binfmt_misc.mount`（4.19 无 binfmt_misc，
+  与本改动无关）。
+- 回退：本次写入前的 BOOT 已在本机保存为
+  `out/steamos/steamos-selector-boot/boot.img`（`f65cde70…`，与此前设备读回一致），
+  需要时从 Download mode 写回；写入前的四分区快照在 `out/steamos/native-preflash3/`。

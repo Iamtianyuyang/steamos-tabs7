@@ -229,6 +229,9 @@ BOOT 中的 initramfs 由 [build-steamos-initramfs.py](../../scripts/build/vendo
 > board-id/msm-id）、已部署 BOOT 的 AVB 签名与 header v2，然后用该 BOOT 的 ramdisk 重建
 > initramfs（只允许 `init` 与 `sbin/start-persistent-gui` 变化）并只替换 ramdisk 重打包，
 > 把新的 BOOT、`preflight.json` 和回滚镜像写到 `out/`。全程不访问设备。
+> 2026-10-24 已在真机执行：BOOT 写入 `0eb66dea…`，读回一致，启动日志显示树从
+> `tabs7linux/ubuntu/steamos` 原子迁移到 `tabs7linux/steamos`，PID 1 为 systemd、
+> Game Mode 单元 active。详见[原生启动测试](../boot/native-boot-tests.md#steamos-only-initramfs-真机结果2026-10-24)。
 
 适配由 [install-systemd-adaptation.py](../../scripts/steamos/install-systemd-adaptation.py)
 安装（每个改动备份并记录，`--uninstall` 精确还原；测试见
