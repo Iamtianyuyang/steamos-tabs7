@@ -136,3 +136,25 @@ scripts/build/mainline/build-steamos-6.2-boot.py \
 （`FDT_ERR_NOTFOUND`）"，本项目为 recovery 草稿专门做过空操作 overlay。LK 在 BOOT
 启动时同样会把 DTBO 分区的 overlay 应用到 BOOT 里的 DTB，这很可能是 14 秒后落回
 Download 的原因。
+
+### 实验 A 结果（2026-10-24）
+
+BOOT 写入 `9b7d8d58…`（vendor 4.19 内核 + 6.2 主线 DTB），`twrp reboot` 后：
+
+```
++ 0s  nothing
++26s  DOWNLOAD mode
+```
+
+**没有出现 initramfs gadget，设备落回 Download mode。** 由于内核对是已知可启动的
+vendor 4.19，唯一变量是 DTB，因此可以确认：**BOOT 里的主线 6.2 DTB 是启动失败的
+触发点**，最可能是 LK 把 DTBO 分区的 overlay 应用到这个 DTB 时失败，从而判定镜像
+不可启动（与本仓库既有记录"原厂 overlay 对主线 DTB 应用失败 `FDT_ERR_NOTFOUND`"
+一致）。
+
+结论：6.2 要能启动，必须解决 DTB/DTBO 这一层——要么给 6.2 DTB 提供可应用的空操作
+overlay/正确的 DTBO 表项，要么让 LK 跳过 overlay（风险高）。之后才轮到实验 B
+（6.2 内核 + vendor DTB）判断内核本身。
+
+辅助脚本：`scripts/device/flash-via-recovery.py`（TWRP 内一条命令完成 push → dd →
+读回校验 → `twrp reboot` → 有界采样 USB，给出"内核是否执行"的判读）。
