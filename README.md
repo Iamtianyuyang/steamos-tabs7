@@ -64,10 +64,16 @@ Kbuild 不能就地构建，脚本会同步到缓存目录：
 
 ```sh
 scripts/setup/prepare-tools.sh
-scripts/build/mainline/build-initramfs.sh
-scripts/build/mainline/build-bringup.sh image
+scripts/build/mainline/build-initramfs.sh           # 最小 bring-up initramfs
+scripts/build/mainline/build-bringup.sh image       # 最小 bring-up 内核
+scripts/build/mainline/build-steamos-6.2.sh image   # bring-up + SteamOS 配置层
 python3 scripts/build/mainline/verify-artifacts.py
 ```
+
+`build-steamos-6.2.sh` 把 `steamos-6.2.config` 叠在 `gts7lwifi-bringup.config` 上，
+逐条核对 122 项请求是否真的保留（SYSVIPC、F2FS、cgroups/pids、DEVTMPFS 不自动挂载等），
+产物在 `out/steamos-kernel-6.2/`。迁移的成品、映射表和阻塞项见
+[内核迁移：4.19 → 6.2](docs/steamos/kernel-6.2.md)。
 
 产物在 `out/bringup/`：`Image`、`Image.gz`、`sm8250-samsung-gts7lwifi.dtb`、
 `initramfs.cpio.gz`、`kernel.config`。默认缓存根是

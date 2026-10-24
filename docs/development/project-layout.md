@@ -21,7 +21,7 @@
 | `scripts/build/vendor/` | 厂商内核镜像、SteamOS initramfs、BOOT 更新与写盘前预检（`preflight-steamos-boot.py`） |
 | `scripts/build/bluetooth/` | HCI 内核变体构建与核验 |
 | `scripts/steamos/` | rootfs 抓取/盘点、Steam 客户端与 systemd 适配安装、IPC 内核核验 |
-| `scripts/build/mainline/` | 主线 6.2 内核、DTB、initramfs 构建与产物核验 |
+| `scripts/build/mainline/` | 主线 6.2 内核、DTB、initramfs 构建、SteamOS 配置层（`build-steamos-6.2.sh`）与产物核验 |
 | `scripts/device/` | 只读设备采集与原厂固件分析 |
 | `scripts/recovery/` | Recovery 封装、AVB 工具调用与写入前核验 |
 | `scripts/setup/` | 主机工具准备与下载校验 |
