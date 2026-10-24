@@ -47,10 +47,10 @@
 | --- | --- | --- | --- |
 | 1 | ~~**C-PHY**~~ | 复查后确认 `dsi_phy_7nm.c` 的 C-PHY 路径其实**已经完整**（`GLBL_CTRL` bit 6、`PEMPH_CTRL_1`、C-PHY 时序寄存器组、cphy 时序计算都在），那句 `TODO: CPHY enable path` 是过时注释，已替换为准确说明 | 无需新写使能路径；先前评估过重，这里更正 |
 | 2 | ~~**PHY 调优**~~（已实现，未上真机） | 主线的 msm DSI PHY 没有"每面板覆盖寄存器"的机制。已在 `dsi_phy.c` 解析 6 个可选 DT 属性、在 `dsi_phy_7nm.c` 的 C-PHY 使能末尾应用，并在绑定里补文档；项目 DTS 的 `dsi0_phy`/`dsi1_phy` 已按提取值写入 | 值来自厂商，行为仍需真机验证 |
-| 3 | **初始化序列** | 主线驱动 2 条占位 vs 厂商 359 条 | 面板不会亮 |
-| 4 | **时序** | 主线 2560×1600@60、HFP96/HSW16/HBP64；厂商 800×2560@120、HFP84/HSW2/HBP30 | 模式与面板不匹配，可能直接黑屏 |
+| 3 | ~~**初始化序列**~~（已生成） | 359 条命令由 `scripts/steamos/emit-panel-seq.py` 从面板 JSON 生成到 `panel-novatek-nt36523-gts7lwifi.h`，驱动用 `mipi_dsi_dcs_write_buffer` 原样重放（含厂商的 wait 延迟与 `0x11`/`0x29`） | 数据与厂商一致；行为待真机 |
+| 4 | ~~**时序**~~（已生成） | 模式改为完整的 1600×2560@120：msm 对 bonded DSI 会把水平时序减半，所以 DRM 模式里用整幅宽度和**翻倍的**水平 porch，每链路回到厂商的 800 宽 + 84/2/30 | 时钟 570265 kHz；行为待真机 |
 | 5 | ~~**lane 数与 PHY 模式**~~（已改） | DTS 现在两条 DSI 都是 `data-lanes = <0 1 2>`，两个 PHY 都带 `phy-type = <11>`（C-PHY，`PHY_TYPE_CPHY` 来自 `dt-bindings/phy/phy.h`） | 与厂商的 3 trio C-PHY 一致 |
-| 6 | **每链路宽度** | 主线注释写"每条 DSI 送完整 2560"；厂商是每条 800（=1600/2） | 双 DSI 拆分方式错误 |
+| 6 | ~~**每链路宽度**~~（已改） | 模式按整幅 1600 宽声明，`dsi_host.c` 的 bonded 逻辑把 hdisplay/htotal 减半，于是每链路正好 800 | 与厂商语义一致 |
 | 7 | **物理尺寸** | 主线 220×138 mm；厂商 148×236 mm | 仅影响 DPI/触摸标定 |
 | 8 | **vddio 供电** | TODO | 面板 IO 无电源 |
 | 9 | **双 VIG 平面布局** | 6.2 有 `sm8250_vig_sblk_*`，但没验证过两个 VIG 分别驱动一个 DSI 接口 | 见面板点亮后第一件事 |
@@ -96,3 +96,34 @@ DTB `e91c2afd…`，130 项请求全部保留。**编译通过不等于能点亮
 仍是占位、时序仍是估算值、`vddio-supply` 仍是 TODO、面板节点仍 `disabled`。
 `tests/steamos/test_dsi_phy_cphy_tuning.py` 会把 DTS 里的调优值和提取出的面板 JSON
 逐一比对，防止两边漂移。
+
+## 面板数据由代码生成（2026-10-24）
+
+359 条初始化命令手工抄写不可审查，所以拆成"数据 = 生成、逻辑 = 手写"：
+
+```sh
+scripts/steamos/extract-panel-profile.py   # 厂商源码 -> panel/nt36523-ppa957db1.json
+scripts/steamos/emit-panel-seq.py          # JSON -> panel-novatek-nt36523-gts7lwifi.h
+scripts/steamos/emit-panel-seq.py --check   # 头文件是否与 JSON 同步
+```
+
+生成的 `panel-novatek-nt36523-gts7lwifi.h` 包含：
+
+- `ppa957db1_init[359]`：`{ len, delay_ms, payload[] }`，payload 以 DCS 命令开头，
+  `delay_ms` 来自厂商 `wait` 字段（有 `0x11` 后等 120 ms 的那一条）；
+- `ppa957db1_mode`：1600×2560@120、`clock 570265 kHz`、htotal 1832、vtotal 2594；
+- `PPA957DB1_RESET_DELAY_MS 12`、物理尺寸 148×236 mm、亮度 4–462。
+
+驱动侧相应改成：`nt36523_send_init_sequence()` 逐条 `mipi_dsi_dcs_write_buffer`，
+**不再**额外发 `0x11`/`0x29`（序列里本来就有，重复发会打乱厂商时序）；
+`lanes = 3`、`MIPI_DSI_MODE_VIDEO_BURST`、`RGB888`；复位按厂商 `<0 12>,<1 12>,<0 12>,<1 12>`。
+`tests/steamos/test_panel_seq.py` 会重跑生成器并逐条比对新旧数据。
+
+编译结果（显示层配置）：`Image cffd32e7…`、`Image.gz 71f1e36f…`、DTB `e91c2afd…`。
+
+## 仍未完成
+
+- `vddio-supply` 仍是 TODO（面板 IO 供电的 LDO 未确认），面板节点仍 `disabled`；
+- 双 VIG 在 `msm`/DPU 上的平面绑定未验证，`65,86` 组合需要在 6.2 上重新求；
+- 亮度 DCS `0x51`（4–462）还没接 backlight 设备；
+- 全部参数只是与厂商源码一致，**没有一项在真机点亮过**。

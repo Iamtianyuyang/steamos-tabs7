@@ -5,9 +5,11 @@
  * Target panel: Samsung Galaxy Tab S7 (gts7lwifi), NT36523 PPA957DB1
  *   2560x1600, video mode, dual-DSI, 4 lanes per DSI
  *
- * DSI init sequence: TODO — extract from downstream techpack
- *   arch/arm64/boot/dts/samsung/gts7l/dsi_panel_NT36523_PPA957DB1_wqxga_video.dtsi
- *   (qcom,mdss-dsi-on-command)
+ * The init sequence, timings and reset delays live in the generated header
+ * panel-novatek-nt36523-gts7lwifi.h, produced by scripts/steamos/emit-panel-seq.py
+ * from the vendor 4.19 panel properties (see
+ * hardware/samsung/gts7lwifi/panel/nt36523-ppa957db1.json). Do not hand-edit
+ * that data; regenerate it instead.
  *
  * Reference driver: panel-truly-nt35597.c (dual-DSI probe pattern)
  */
@@ -25,18 +27,23 @@
 #include <drm/drm_modes.h>
 #include <drm/drm_panel.h>
 
-struct nt36523_cmd {
-	u8 cmd;
-	u8 data;
+/* One downstream init command: DCS payload plus the vendor wait after it. */
+struct nt36523_init_cmd {
+	u8 len;
+	u8 delay_ms;
+	u8 payload[16];
 };
 
 struct nt36523_desc {
 	const struct drm_display_mode *mode;
 	unsigned int width_mm;
 	unsigned int height_mm;
-	const struct nt36523_cmd *on_cmds;
-	unsigned int num_on_cmds;
+	const struct nt36523_init_cmd *init;
+	unsigned int num_init;
 };
+
+/* Generated panel data: ppa957db1_init[], ppa957db1_mode, reset delays. */
+#include "panel-novatek-nt36523-gts7lwifi.h"
 
 struct nt36523 {
 	struct drm_panel panel;
@@ -56,64 +63,35 @@ static inline struct nt36523 *to_nt36523(struct drm_panel *panel)
 	return container_of(panel, struct nt36523, panel);
 }
 
-static int nt36523_write_cmd(struct nt36523 *ctx, u8 cmd, u8 data)
+static int nt36523_send_init_sequence(struct nt36523 *ctx)
 {
-	return mipi_dsi_dcs_write(ctx->dsi[0], cmd, &data, 1);
+	const struct nt36523_init_cmd *cmd;
+	unsigned int index;
+	int ret;
+
+	for (index = 0; index < ctx->desc->num_init; index++) {
+		cmd = &ctx->desc->init[index];
+
+		/* payload[0] is the DCS command, the rest is its data */
+		ret = mipi_dsi_dcs_write_buffer(ctx->dsi[0], cmd->payload, cmd->len);
+		if (ret < 0) {
+			dev_err(ctx->panel.dev, "init command %u failed: %d\n", index, ret);
+			return ret;
+		}
+
+		if (cmd->delay_ms)
+			msleep(cmd->delay_ms);
+	}
+
+	return 0;
 }
-
-/*
- * NT36523 PPA957DB1 init sequence
- * TODO: fill from downstream qcom,mdss-dsi-on-command
- * These are placeholder no-ops — the panel will not light up until
- * the real sequence is populated.
- */
-static const struct nt36523_cmd ppa957db1_on_cmds[] = {
-	/*
-	 * Placeholder: extract from downstream
-	 *   dsi_panel_NT36523_PPA957DB1_wqxga_video.dtsi
-	 * Format: { .cmd = REG, .data = VALUE }
-	 * Example for NT36xxx page switch:
-	 *   { 0xFF, 0x10 },  -- page 0 (user)
-	 *   { 0xFB, 0x01 },  -- reload MTP
-	 *   ...
-	 */
-	{ 0xFF, 0x10 },
-	{ 0xFB, 0x01 },
-};
-
-/*
- * Display timing for NT36523 PPA957DB1, WQXGA 2560x1600 @ 60Hz
- *
- * Clock and porch values are approximate — calibrate against downstream
- * techpack timing parameters:
- *   mdss_dsi_panel_timings (h_back_porch, h_front_porch, h_sync_skew,
- *                            v_back_porch, v_front_porch, v_sync_lines)
- *
- * Each DSI carries the full 2560px horizontal (IC does internal split);
- * so hdisplay here reflects the full panel width.
- */
-static const struct drm_display_mode ppa957db1_mode = {
-	.clock		= 268316,	/* TODO: confirm from downstream */
-
-	.hdisplay	= 2560,
-	.hsync_start	= 2560 + 96,	/* HFP */
-	.hsync_end	= 2560 + 96 + 16,	/* HSW */
-	.htotal		= 2560 + 96 + 16 + 64,	/* HBP */
-
-	.vdisplay	= 1600,
-	.vsync_start	= 1600 + 16,	/* VFP */
-	.vsync_end	= 1600 + 16 + 4,	/* VSW */
-	.vtotal		= 1600 + 16 + 4 + 16,	/* VBP */
-
-	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
-};
 
 static const struct nt36523_desc ppa957db1_desc = {
 	.mode		= &ppa957db1_mode,
-	.width_mm	= 220,	/* 220mm diagonal tablet panel */
-	.height_mm	= 138,
-	.on_cmds	= ppa957db1_on_cmds,
-	.num_on_cmds	= ARRAY_SIZE(ppa957db1_on_cmds),
+	.width_mm	= PPA957DB1_PHYSICAL_WIDTH_MM,
+	.height_mm	= PPA957DB1_PHYSICAL_HEIGHT_MM,
+	.init		= ppa957db1_init,
+	.num_init	= ARRAY_SIZE(ppa957db1_init),
 };
 
 static int nt36523_power_on(struct nt36523 *ctx)
@@ -130,13 +108,18 @@ static int nt36523_power_on(struct nt36523 *ctx)
 	gpiod_set_value_cansleep(ctx->ldo_en_gpio, 1);
 	usleep_range(2000, 3000);
 
-	/* reset: high → low → high */
-	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-	usleep_range(5000, 6000);
+	/*
+	 * Vendor reset sequence: <0 12>, <1 12>, <0 12>, <1 12> in ms, taken from
+	 * qcom,mdss-dsi-reset-sequence.
+	 */
 	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-	usleep_range(5000, 6000);
+	msleep(PPA957DB1_RESET_DELAY_MS);
 	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-	msleep(20);
+	msleep(PPA957DB1_RESET_DELAY_MS);
+	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
+	msleep(PPA957DB1_RESET_DELAY_MS);
+	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+	msleep(PPA957DB1_RESET_DELAY_MS);
 
 	return 0;
 }
@@ -155,7 +138,7 @@ static int nt36523_power_off(struct nt36523 *ctx)
 static int nt36523_prepare(struct drm_panel *panel)
 {
 	struct nt36523 *ctx = to_nt36523(panel);
-	int ret, i;
+	int ret;
 
 	if (ctx->prepared)
 		return 0;
@@ -167,29 +150,14 @@ static int nt36523_prepare(struct drm_panel *panel)
 	ctx->dsi[0]->mode_flags |= MIPI_DSI_MODE_LPM;
 	ctx->dsi[1]->mode_flags |= MIPI_DSI_MODE_LPM;
 
-	/* send init sequence via primary DSI */
-	for (i = 0; i < ctx->desc->num_on_cmds; i++) {
-		ret = nt36523_write_cmd(ctx,
-					ctx->desc->on_cmds[i].cmd,
-					ctx->desc->on_cmds[i].data);
-		if (ret < 0) {
-			dev_err(panel->dev, "init cmd %d failed: %d\n", i, ret);
-			goto err;
-		}
-	}
-
-	ret = mipi_dsi_dcs_exit_sleep_mode(ctx->dsi[0]);
-	if (ret < 0) {
-		dev_err(panel->dev, "exit sleep failed: %d\n", ret);
+	/*
+	 * The vendor sequence already contains sleep-out (0x11) and display-on
+	 * (0x29) with their waits, so replay it verbatim instead of adding them.
+	 */
+	ret = nt36523_send_init_sequence(ctx);
+	if (ret < 0)
 		goto err;
-	}
-	msleep(120);
 
-	ret = mipi_dsi_dcs_set_display_on(ctx->dsi[0]);
-	if (ret < 0) {
-		dev_err(panel->dev, "display on failed: %d\n", ret);
-		goto err;
-	}
 	msleep(20);
 
 	ctx->prepared = true;
@@ -322,9 +290,14 @@ static int nt36523_probe(struct mipi_dsi_device *dsi)
 	drm_panel_add(&ctx->panel);
 
 	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
-		ctx->dsi[i]->lanes = 4;
+		/*
+		 * 3 C-PHY trios per link (qcom,panel-cphy-mode in the vendor DTS),
+		 * 24 bpp RGB and burst video mode with BLLP power saving.
+		 */
+		ctx->dsi[i]->lanes = 3;
 		ctx->dsi[i]->format = MIPI_DSI_FMT_RGB888;
 		ctx->dsi[i]->mode_flags = MIPI_DSI_MODE_VIDEO |
+					   MIPI_DSI_MODE_VIDEO_BURST |
 					   MIPI_DSI_MODE_VIDEO_HSE |
 					   MIPI_DSI_CLOCK_NON_CONTINUOUS;
 		ret = mipi_dsi_attach(ctx->dsi[i]);
@@ -385,5 +358,5 @@ static struct mipi_dsi_driver nt36523_driver = {
 module_mipi_dsi_driver(nt36523_driver);
 
 MODULE_AUTHOR("gts7lwifi mainline contributors");
-MODULE_DESCRIPTION("Novatek NT36523 WQXGA dual-DSI panel driver");
+MODULE_DESCRIPTION("Novatek NT36523 WQXGA dual-DSI panel driver (SM-T870 PPA957DB1)");
 MODULE_LICENSE("GPL");
