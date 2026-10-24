@@ -220,7 +220,9 @@ BOOT 中的 initramfs 由 [build-steamos-initramfs.py](../../scripts/build/vendo
 > `tabs7linux/steamos` 树，bind 到 `/newroot`、挂 devtmpfs，然后 `switch_root`
 > 到 systemd。旧路径 `tabs7linux/ubuntu/steamos` 会被一次性原子重命名到
 > `tabs7linux/steamos`；校验失败则停在前台 RAM 环境（USB RNDIS/ACM、telnet）并写
-> `/run/steamos-bootstrap.log`。
+> `/run/steamos-bootstrap.log`（成功时该日志会复制到
+> `/newroot/var/log/tabs7linux-initramfs/`）。迁移后 `tabs7linux/ubuntu` 里只剩
+> 旧 Ubuntu 根文件系统，确认 SteamOS 能启动后再从 RAM shell 里手工删除。
 
 适配由 [install-systemd-adaptation.py](../../scripts/steamos/install-systemd-adaptation.py)
 安装（每个改动备份并记录，`--uninstall` 精确还原；测试见
