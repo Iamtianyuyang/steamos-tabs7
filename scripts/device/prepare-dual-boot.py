@@ -136,6 +136,9 @@ def main():
     shutil.copyfile(SWITCHER, output / 'switch-boot.sh')
     (output / 'switch-boot.sh').chmod(0o755)
 
+    for name in ('android', 'linux') + (('recovery',) if recovery is not None else ()):
+        (output / f'{name}.sha256').write_text(f'{sha(output / (name + ".img"))}  {name}.img\n')
+
     manifest = {
         'kind': 'tabs7linux dual-boot store',
         'boot_partition_capacity': capacity,

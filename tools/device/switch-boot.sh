@@ -39,9 +39,9 @@ partition_bytes() {
 sha_of() { sha256sum "$1" | cut -d' ' -f1; }
 
 expected_sha() {
-    # manifest.json is {"android": {"sha256": ...}, "linux": {"sha256": ...}}
-    sed -n 's/.*"'"$1"'"[^}]*"sha256"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{64\}\)".*/\1/p' \
-        "$STORE/manifest.json"
+    # <image>.sha256 holds "hash  filename", written by prepare-dual-boot.py
+    [ -f "$STORE/$1.sha256" ] || return 0
+    cut -d' ' -f1 < "$STORE/$1.sha256"
 }
 
 [ -d "$STORE" ] || die "image store not found: $STORE"
@@ -69,7 +69,7 @@ android|linux)
     size=$(stat -c %s "$image")
     [ "$size" -eq "$capacity" ] || die "$action.img is $size bytes, partition is $capacity; refusing a partial write"
     want=$(expected_sha "$action")
-    [ -n "$want" ] || die "no recorded sha256 for $action in $STORE/manifest.json"
+    [ -n "$want" ] || die "no recorded sha256 for $action ($STORE/$action.sha256 missing)"
     got=$(sha_of "$image")
     [ "$got" = "$want" ] || die "$action.img hash mismatch: $got != $want"
     say "writing $action.img ($got)"

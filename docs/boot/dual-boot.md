@@ -37,11 +37,18 @@ testkey 验签通过；recovery 也是完整分区大小。产物：
 ## 切换（recovery 内）
 
 ```sh
-adb push out/dual-boot /data/media/0/tabs7linux/boot
-adb shell sh /data/media/0/tabs7linux/boot/switch-boot.sh status
-adb shell sh /data/media/0/tabs7linux/boot/switch-boot.sh android --reboot
-adb shell sh /data/media/0/tabs7linux/boot/switch-boot.sh linux   --reboot
+# TWRP 的 /data/media/0 走 sdcard 封装，会报 secure_mkdirs 失败，改用裸 /data 路径
+adb push out/dual-boot/. /data/tabs7linux/boot/
+export TABS7_BOOT_STORE=/data/tabs7linux/boot
+adb shell "TABS7_BOOT_STORE=$TABS7_BOOT_STORE sh /data/tabs7linux/boot/switch-boot.sh status"
+adb shell "TABS7_BOOT_STORE=$TABS7_BOOT_STORE sh /data/tabs7linux/boot/switch-boot.sh linux"
+adb shell 'twrp reboot'      # 必须用 twrp reboot；adb reboot 会再次回到 recovery
 ```
+
+实测（2026-10-24）：`switch-boot.sh linux` 从 TWRP 写入 BOOT 并读回
+`37f5aa13…`，`twrp reboot` 后 SteamOS 起来（4.19 内核、PID 1 systemd、
+`tabs7-gamescope-session.service` active）。**这条路完全绕开 ODIN**，自定义内核
+启动失败也不会影响它——当时设备正处于"Download 兜底"状态，TWRP 仍然正常启动。
 
 脚本行为：找 `by-name/boot`、取分区字节数、校验镜像大小与 manifest 哈希、
 `dd` 写入、`sync`、**读回比对哈希**，最后可选 `reboot`。任何一步不符就退出，不做部分写入。
