@@ -53,10 +53,12 @@ scripts/build/mainline/build-steamos-6.2.sh image    # DTB + Image/Image.gz（�
 
 ## 按顺序的阻塞项
 
-1. **initramfs 找不到 userdata**。`start-persistent-gui` 现在从 `/sys/class/block/*/uevent`
-   读 `PARTNAME=userdata`，这个属性来自厂商内核补丁；主线只会提供 GPT 分区名
-   （`/sys/class/block/*/partlabel`，需要 `CONFIG_EFI_PARTITION=y`）。切 6.2 前必须把
-   探测改成"先读 partlabel，再回退 uevent"，否则会在挂载前就失败。
+1. ~~**initramfs 找不到 userdata**~~（已实现，待 6.2 真机验证）。`start-persistent-gui`
+   现在先读 `/sys/class/block/*/partlabel`（主线的 GPT 名称，需 `CONFIG_EFI_PARTITION=y`，
+   已加入本层的 123 项请求），没有该属性时回退到厂商内核的 `uevent PARTNAME`，命中后
+   仍然按 F2FS 双超级块 magic 与 UUID 校验。2026-10-24 在 4.19 上验证了回退分支
+   （日志为 `userdata matched by PARTNAME`）；**partlabel 分支要等 6.2 首次启动才会第一次
+   真正执行**，因此在 6.2 上这条路径属于未验证代码。
 2. **显示**：6.2 主线没有这块面板的驱动，也没有验证过双 VIG 在 `msm`/DPU 上的平面布局。
 3. **GPU 用户空间**：Turnip-KGSL 链路在 6.2 上不成立，需要重建 freedreno/Turnip(mSM) +
    gamescope 的构建与库布局，`userspace/steamos/gamescope-session` 里的

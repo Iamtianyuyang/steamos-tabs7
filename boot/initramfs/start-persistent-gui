@@ -83,12 +83,22 @@ is_steamos_tree() {
 "$BB" grep -qw f2fs /proc/filesystems || fail 'built-in F2FS is unavailable'
 
 # Enumerate GPT-labelled partitions. Never fall back to a guessed device number.
+# Mainline exposes the GPT name as the partlabel attribute; the vendor 4.19 kernel
+# only reports it as PARTNAME in uevent, so accept either and count each device
+# once. CONFIG_EFI_PARTITION supplies partlabel on 6.2.
 userdata_device=
 partition_count=0
 for block_directory in /sys/class/block/*; do
     [ -f "$block_directory/partition" ] || continue
     [ -f "$block_directory/uevent" ] || continue
-    "$BB" grep -qx 'PARTNAME=userdata' "$block_directory/uevent" || continue
+    if [ -f "$block_directory/partlabel" ]; then
+        label=$("$BB" cat "$block_directory/partlabel") || fail "unreadable partlabel in $block_directory"
+        matched_by=partlabel
+    else
+        label=$("$BB" sed -n 's/^PARTNAME=//p' "$block_directory/uevent") || fail "unreadable uevent in $block_directory"
+        matched_by=PARTNAME
+    fi
+    [ "$label" = userdata ] || continue
     device_name=$("$BB" sed -n 's/^DEVNAME=//p' "$block_directory/uevent")
     case "$device_name" in ''|*[!a-zA-Z0-9_-]*) fail 'unexpected userdata device name' ;; esac
     userdata_device=/dev/$device_name
@@ -99,7 +109,7 @@ for block_directory in /sys/class/block/*; do
     [ "$expected_rdev" = "$((0x$device_major)):$((0x$device_minor))" ] || fail 'device node does not match sysfs'
     partition_count=$((partition_count + 1))
 done
-[ "$partition_count" -eq 1 ] || fail "expected one PARTNAME=userdata partition, found $partition_count"
+[ "$partition_count" -eq 1 ] || fail "expected one userdata partition, found $partition_count"
 
 # The pinned BusyBox lacks blkid. F2FS 4.19 uses superblocks at 0x400/0x1400,
 # with little-endian magic 0xf2f52010 and the 16-byte UUID at superblock+108.
@@ -108,7 +118,7 @@ for superblock_offset in 1024 5120; do
     [ "$(read_hex "$userdata_device" "$superblock_offset" 4)" = 1020f5f2 ] || fail 'F2FS superblock magic mismatch'
     [ "$(read_hex "$userdata_device" "$((superblock_offset + 108))" 16)" = "$DATA_UUID_HEX" ] || fail 'userdata UUID mismatch'
 done
-printf 'Verified %s: PARTNAME=userdata, F2FS, UUID=%s\n' "$userdata_device" "$DATA_UUID"
+printf 'Verified %s: userdata matched by %s, F2FS, UUID=%s\n' "$userdata_device" "$matched_by" "$DATA_UUID"
 
 "$BB" mkdir -p "$DATA_MOUNT"
 if is_mounted "$DATA_MOUNT"; then

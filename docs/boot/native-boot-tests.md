@@ -218,3 +218,22 @@ BOOT（`f65cde70…`）的 AVB 签名、header v2、从该 BOOT 解出的 ramdis
 - 回退：本次写入前的 BOOT 已在本机保存为
   `out/steamos/steamos-selector-boot/boot.img`（`f65cde70…`，与此前设备读回一致），
   需要时从 Download mode 写回；写入前的四分区快照在 `out/steamos/native-preflash3/`。
+
+### userdata 探测兼容 6.2（2026-10-24，第二次写入）
+
+`start-persistent-gui` 改为先读 GPT `partlabel`、再回退 `uevent PARTNAME` 后重新
+生成 initramfs 并写入 BOOT：
+
+- 写入前 BOOT 读回 `0eb66dea…84dba8`；`preflight-steamos-boot.py` 逐项比对显示只有
+  `sbin/start-persistent-gui` 变化，其余 48 项一致。
+- 写入：`samloader flash --partition BOOT`，本机镜像
+  `out/steamos/boot-preflight-20261024-145309/boot/boot.img`（`37f5aa13…c4d9741995`）。
+- 读回（SteamOS 内 `sha256sum /dev/sda22`）：`37f5aa13…`，与写入镜像一致；
+  DTBO/RECOVERY/VBMETA 未变。
+- 启动日志：`Verified /dev/sda35: userdata matched by PARTNAME, F2FS, UUID=…` →
+  `Validated SteamOS tree: /mnt/native-data/tabs7linux/steamos`（没有 `Adopted`，
+  因为树在上一次启动已经迁移）。PID 1 为 systemd，`tabs7-gamescope-session.service`
+  active。
+- 4.19 厂商内核没有暴露 `partlabel`，所以这次实际走的是回退分支；`partlabel` 分支
+  要等主线 6.2 首次启动才算真机验证。
+- 回退镜像：`out/steamos/boot-preflight-20261024-143134/boot/boot.img`（`0eb66dea…`）。

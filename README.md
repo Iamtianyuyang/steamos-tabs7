@@ -105,7 +105,8 @@ python3 scripts/build/vendor/preflight-steamos-boot.py \
 它不接触设备；产物（新的 `boot.img`、`preflight.json`、回滚用的 `backup-view/`）都在
 ignored `out/`，写盘与读回比对仍需单独授权。
 
-`boot/initramfs/start-persistent-gui` 校验 userdata 分区（PARTNAME/F2FS UUID）后，
+`boot/initramfs/start-persistent-gui` 校验 userdata 分区（GPT `partlabel` 优先、
+厂商内核回退到 `uevent PARTNAME`，命中后仍校验 F2FS 魔法与 UUID）后，
 校验 `tabs7linux/steamos` 树（`os-release`、适配标记、systemd），bind 到 `/newroot`、
 挂上 devtmpfs，再 `switch_root` 到 SteamOS systemd。**启动目标不再可选**：没有
 Ubuntu 出口，也不需要 `boot-target` 文件。校验失败时停在前台 RAM 环境，USB RNDIS/
