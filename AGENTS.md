@@ -1,6 +1,9 @@
 # Tab S7 Linux port
 
 - Device: Samsung SM-T870 / gts7lwifi, hardware revision 7.
+- Project version: **0.0.001**, kept in `VERSION`. Do not change the version
+  number, retag releases or invent new version names unless the user asks for it
+  explicitly; a hardware result alone is not a reason to bump it.
 - **Project goal: the full SteamOS ARM port on the mainline 6.2 kernel.**
   SteamOS (Game Mode and Desktop Mode) with the two-VIG display path. Everything
   else in the tree exists only to serve that goal; the Ubuntu GNOME/Phosh/XFCE
