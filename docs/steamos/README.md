@@ -249,6 +249,33 @@ seatd、logind 运行，调试 shell 可用。发现两项并已加入屏蔽表�
 - fstab 的 by-partsets `/home`、`/efi`、`/esp` 设备不存在，`nofail` 仍会等满 90 s 并拖住
   `local-fs.target`；屏蔽对应生成单元后启动继续。
 
+### 设备节点服务（2026-10-24）
+
+厂商 4.19 没有 `DEVTMPFS`，`/dev` 是普通 tmpfs，所以新出现的输入设备（Steam Input
+用 `uinput` 建的虚拟手柄、蓝牙手柄、重新探测的触摸屏）不会得到 `/dev/input/eventN`，
+libinput 没有节点可开——这是 Steam Input 一直卡住的原因。
+
+现在由 `userspace/steamos/device-nodes/create-missing-nodes.py` 负责：轮询
+`/sys/class/input/event*`，缺节点就按 `dev` 里的 major:minor 建（0660，root:input），
+再往对应 `uevent` 写 `add`，让 udev 与 libinput 按内核正常上报的路径接管；设备消失时
+删掉自己建的节点。systemd 单元 `tabs7-device-nodes.service`（`WantedBy=sysinit.target`）
+由 `install-systemd-adaptation.py` 一并安装。
+
+设备上应用并验证：
+
+```sh
+python3 /usr/local/lib/tabs7linux/steamos/create-missing-nodes.py --once   # 单次检查
+systemctl status tabs7-device-nodes.service
+journalctl -u tabs7-device-nodes.service -b | tail
+```
+
+重新跑安装器以部署这一项（需 `--root` 指向 SteamOS 树）：
+
+```sh
+python3 scripts/steamos/install-systemd-adaptation.py --root / --game-mode \
+    --gpu-firmware-manifest <gpu-firmware.json> --gpu-firmware-dir <dir>
+```
+
 **Game Mode 层（已部署，2026-10-24）**：`install-systemd-adaptation.py --game-mode` 从 Ubuntu 树按
 清单哈希复制 6 个 Adreno 650 固件，安装 KGSL/ION udev 规则（`render` 组 0660）、面板平面 ID
 `/etc/tabs7linux/sm-t870-split`、`tabs7-gamescope-session.service`（User=steamos、PAM login、

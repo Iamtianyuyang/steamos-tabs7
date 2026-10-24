@@ -1,0 +1,16 @@
+[Unit]
+Description=Create /dev/input nodes on a kernel without devtmpfs
+Documentation=file:///usr/local/lib/tabs7linux/steamos/create-missing-nodes.py
+DefaultDependencies=no
+After=systemd-udevd.service
+Before=multi-user.target graphical.target
+Conflicts=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/tabs7linux/steamos/create-missing-nodes.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=sysinit.target

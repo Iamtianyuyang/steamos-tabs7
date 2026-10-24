@@ -138,6 +138,12 @@ def install(tree, busybox, game_mode=None):
     for target in ('sysinit', 'emergency', 'rescue'):
         tree.link(f'etc/systemd/system/{target}.target.wants/tabs7-debug-shell.service',
                   '/etc/systemd/system/tabs7-debug-shell.service')
+    tree.write('usr/local/lib/tabs7linux/steamos/create-missing-nodes.py',
+               (SOURCE.parent / 'device-nodes/create-missing-nodes.py').read_bytes(), 0o755)
+    tree.write('etc/systemd/system/tabs7-device-nodes.service',
+               (SOURCE / 'tabs7-device-nodes.service').read_bytes())
+    tree.link('etc/systemd/system/sysinit.target.wants/tabs7-device-nodes.service',
+              '/etc/systemd/system/tabs7-device-nodes.service')
     tree.write('etc/NetworkManager/conf.d/50-tabs7-usb0.conf', (SOURCE / '50-tabs7-usb0.conf').read_bytes())
     tree.write('etc/systemd/network/10-tabs7-usb0.link', (SOURCE / '10-tabs7-usb0.link').read_bytes())
     tree.write('etc/systemd/journald.conf.d/50-tabs7-persistent.conf', (SOURCE / '50-tabs7-persistent.conf').read_bytes())
