@@ -533,29 +533,29 @@
 };
 
 /* ----------------------------------------------------------------
- * 显示 — Stage D
+ * 显示 — mainline 6.2
  *
- * NT36523 PPA957DB1：WQXGA 2560×1600，video 模式，dual-DSI
- * panel 驱动需新增：drivers/gpu/drm/panel/panel-novatek-nt36523.c
- *   compatible = "samsung,gts7l-nt36523"
- *   DSI 初始化序列从 downstream techpack 提取（待做）
+ * NT36523 PPA957DB1：1600×2560（每链路 800 宽），video 模式，dual-DSI bonded。
+ *   panel 驱动    drivers/gpu/drm/panel/panel-novatek-nt36523.c
+ *   compatible    samsung,gts7l-nt36523
+ *   初始化/时序   由 scripts/steamos/emit-panel-seq.py 生成
  *
  * GPIO（来自 downstream kona-sec-gts7l-display-r00.dtsi）：
- *   reset  = tlmm82
- *   ldo-en = tlmm135
- *   buck-en = tlmm93
- *   ub-esd = tlmm46
+ *   reset = tlmm82, vddlcd = tlmm135, buck = tlmm93,
+ *   esd = tlmm66（上升沿）, ub-con-det = tlmm46
+ *
+ * 尚未在真机点亮；这里打开节点是为了让 6.2 内核能真正 probe 显示链路。
  * ---------------------------------------------------------------- */
 &mdss {
-	status = "disabled";
+	status = "okay";
 };
 
 &mdss_mdp {
-	status = "disabled";
+	status = "okay";
 };
 
 &dsi0 {
-	status = "disabled";
+	status = "okay";
 	vdda-supply = <&vreg_l9a_1p2>;
 
 	/*
@@ -584,7 +584,7 @@
  * phy_str_swi_cal_sel_ctrl).
  */
 &dsi0_phy {
-	status = "disabled";
+	status = "okay";
 	vdds-supply = <&vreg_l5a_0p88>;
 	phy-type = <11>;
 	qcom,cphy-vreg-ctrl-0 = <0x50>;
@@ -596,7 +596,7 @@
 };
 
 &dsi1 {
-	status = "disabled";
+	status = "okay";
 	vdda-supply = <&vreg_l9a_1p2>;
 
 	qcom,dual-dsi-mode;
@@ -616,7 +616,7 @@
 /* panel node appended to &dsi0 block below */
 
 &dsi1_phy {
-	status = "disabled";
+	status = "okay";
 	vdds-supply = <&vreg_l5a_0p88>;
 	phy-type = <11>;
 	qcom,cphy-vreg-ctrl-0 = <0x50>;
@@ -663,8 +663,12 @@
 &dsi0 {
 	panel@0 {
 		compatible = "samsung,gts7l-nt36523";
-		status = "disabled";
+		status = "okay";
 		reg = <0>;
+
+		/* vendor pinctrl: reset 8 mA no pull, ESD 8 mA and UB det 2 mA inputs */
+		pinctrl-names = "default";
+		pinctrl-0 = <&panel_reset_default &panel_ub_det_default &panel_esd_default>;
 
 		reset-gpios = <&tlmm 82 GPIO_ACTIVE_LOW>;
 
@@ -718,6 +722,30 @@
  * ---------------------------------------------------------------- */
 &tlmm {
 	gpio-reserved-ranges = <40 4>;
+
+	/* Panel pins, values from the downstream display DTS. */
+	panel_reset_default: panel-reset-default {
+		pins = "gpio82";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	panel_ub_det_default: panel-ub-det-default {
+		pins = "gpio46";
+		function = "gpio";
+		drive-strength = <2>;
+		input-enable;
+		bias-disable;
+	};
+
+	panel_esd_default: panel-esd-default {
+		pins = "gpio66";
+		function = "gpio";
+		drive-strength = <8>;
+		input-enable;
+		bias-disable;
+	};
 
 	sdc2_default_state: sdc2-default-state {
 		clk {

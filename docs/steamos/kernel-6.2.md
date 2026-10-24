@@ -73,3 +73,40 @@ scripts/build/mainline/build-steamos-6.2.sh image \
 
 在 1–4 任一项在真机上通过之前，不要把 6.2 产物写成"可启动内核"，也不要覆盖 4.19 的
 BOOT（当前 `0eb66dea…`）。
+
+## 6.2 BOOT 候选（已生成，未刷写）
+
+`scripts/build/mainline/build-steamos-6.2-boot.py` 把 6.2 内核打进 BOOT：沿用设备上
+正在用的 BOOT 的 header v2 参数与命令行，只替换三个载荷（`Image`、DTB、
+initramfs），用同样的 rollback index/location 重新签 AVB。
+
+```sh
+scripts/build/mainline/build-steamos-6.2-boot.py \
+    --snapshot out/steamos/native-preflash3 \
+    --deployed-boot out/steamos/boot-preflight-20261024-145309/boot/boot.img \
+    --kernel out/steamos-kernel-6.2/Image \
+    --dtb out/steamos-kernel-6.2/sm8250-samsung-gts7lwifi.dtb \
+    --ramdisk out/steamos/boot-preflight-20261024-145309/boot/initramfs.cpio.gz \
+    --output out/steamos-kernel-6.2/boot
+```
+
+写入前它会依次核对：同一次启动的四分区快照（manifest 哈希、PIT 容量、DTBO/RECOVERY
+布局、实时 DTB、board-id/msm-id）、已部署 BOOT 的 AVB 签名与 header v2、内核确实是
+6.2、DTB 里确实有面板节点，最后核对重打包后只有三个载荷变化、header 与命令行逐项
+一致、镜像正好等于 BOOT 分区容量。
+
+当前产物：
+
+| 项 | 值 |
+| --- | --- |
+| `boot.img` | `out/steamos-kernel-6.2/boot/boot.img`，`46752485…0e9c5148` |
+| 大小 | 71,303,168 字节（与 BOOT 分区容量完全相同） |
+| 内核 | `Linux version 6.2.0`（clang 18.1.3），显示层配置 |
+| DTB | `1a14781f…`，含 `samsung,gts7l-nt36523` 面板节点 |
+| initramfs | 与 4.19 上正在运行的那个相同（partlabel/PARTNAME 双探测） |
+| manifest | `out/steamos-kernel-6.2/boot/manifest.json`，`hardware_boot_observed: false` |
+
+刷写这个镜像会把当前稳定运行的 4.19 SteamOS 换成**从未启动过的 6.2 内核**：失败时
+预期落在 initramfs 的 USB/telnet 环境（面板不亮也还能进），但没有任何真机证据。
+所以脚本只生成镜像，写盘仍要单独授权；回退镜像是
+`out/steamos/boot-preflight-20261024-145309/boot/boot.img`（`37f5aa13…`）。

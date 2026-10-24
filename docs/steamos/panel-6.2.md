@@ -181,11 +181,17 @@ DPU 的限制；6.2 主线应当在 DPU 内部完成拆分，wlroots/gamescope �
 `prepare`/`unprepare` 与 ESD 恢复共用一把 mutex，`unprepare`/`remove` 会
 `cancel_work_sync()`，避免恢复流程与下电交叉。
 
-## 仍未完成
+## 显示链路已打开（2026-10-24）
 
-- 面板节点仍是 `disabled`：点亮前要先在真机确认 C-PHY 锁定与初始化序列；
+DTS 里 `mdss`、`mdss_mdp`、`dsi0`、`dsi1`、两个 PHY 和 `panel@0` 全部改为
+`status = "okay"`，面板节点带上厂商的 pinctrl 状态（reset gpio82 8 mA 无上下拉、
+ub-con-det gpio46 2 mA 输入、esd gpio66 8 mA 输入，均 `bias-disable`）。DTB 构建结果
+`1a14781f…`，并且 6.2 BOOT 候选会检查 DTB 里确实存在 `samsung,gts7l-nt36523` 节点。
+
+## 仍未完成（都需要真机）
+
+- 面板从未点亮：C-PHY 锁定、359 条初始化序列、时序与双链路同步都只有编译证据；
 - `qcom,sync-dual-dsi` 是否需要打开，要看真机上两半是否撕裂；
-- ESD 的 pinctrl（厂商是 8 mA/2 mA、input-enable、bias-disable）还没搬过来，
-  主线目前靠 TLMM 默认配置，可能出现误触发；
 - 双 VIG 的 DPU split 分配需要在点亮后用 `dmesg`/帧内容确认左右半屏对应关系；
-- 全部参数只是与厂商源码一致，**没有一项在真机点亮过**。
+- ESD 恢复路径只在真机上才能验证（触发条件、恢复后画面）；
+- 亮度 `update_status` 与面板实际亮度响应需要看一眼。

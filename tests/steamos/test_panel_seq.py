@@ -137,6 +137,33 @@ class GeneratedHeaderTest(unittest.TestCase):
         self.assertIn('nt36523_send_init_sequence(ctx)', work)
         self.assertIn('if (!ctx->prepared)', work, 'recover only while the panel is on')
 
+    def test_display_pipeline_is_enabled_in_the_board_dts(self):
+        dts = (KERNEL / 'arch/arm64/boot/dts/qcom/sm8250-samsung-gts7-common.dtsi').read_text()
+        for node in ('mdss', 'mdss_mdp', 'dsi0', 'dsi0_phy', 'dsi1', 'dsi1_phy'):
+            body = dts[dts.index(f'&{node} {{'):]
+            body = body[:body.index('\n};')]
+            self.assertIn('status = "okay";', body, node)
+        panel = dts[dts.index('panel@0 {'):]
+        panel = panel[:panel.index('\n\t};')]
+        self.assertIn('status = "okay";', panel)
+        self.assertIn('pinctrl-0 = <&panel_reset_default &panel_ub_det_default &panel_esd_default>;', panel)
+        for state, pins, strength in (('panel_reset_default', 'gpio82', 8),
+                                      ('panel_ub_det_default', 'gpio46', 2),
+                                      ('panel_esd_default', 'gpio66', 8)):
+            body = dts[dts.index(f'{state}:'):]
+            body = body[:body.index('\n\t};')]
+            self.assertIn(f'pins = "{pins}";', body, state)
+            self.assertIn(f'drive-strength = <{strength}>;', body, state)
+            self.assertIn('bias-disable;', body, state)
+
+    def test_six_two_boot_builder_guards(self):
+        builder = (ROOT / 'scripts/build/mainline/build-steamos-6.2-boot.py').read_text()
+        self.assertIn("if '6.2' not in version.split()[2]", builder)
+        self.assertIn("b'samsung,gts7l-nt36523' not in dtb.read_bytes()", builder)
+        self.assertIn("'--partition_size', str(capacity)", builder)
+        self.assertIn('hardware_boot_observed', builder)
+        self.assertIn('flash_requires_user_authorization', builder)
+
     def test_sleep_out_and_display_on_are_not_sent_twice(self):
         self.assertNotIn('mipi_dsi_dcs_exit_sleep_mode', self.driver)
         self.assertNotIn('mipi_dsi_dcs_set_display_on', self.driver)

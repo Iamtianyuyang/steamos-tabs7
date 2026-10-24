@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Pack the mainline 6.2 kernel into a BOOT image candidate (never flashed here).
+
+Reuses the header and command line of the deployed Linux BOOT and swaps the
+three payload components: the 6.2 ``Image``, the 6.2 DTB and the already
+deployed initramfs. The AVB footer is recreated with the same rollback index
+and location, so the result has the same shape as the working image.
+
+Before writing anything it verifies, in this order:
+
+* the same-boot partition snapshot (manifest hashes, PIT capacity, DTBO and
+  RECOVERY layout, live DTB, board-id/msm-id);
+* the deployed BOOT signature, header v2 and command line;
+* that the kernel really is 6.2 and that the DTB contains the panel node;
+* after packing, that only kernel/dtb/ramdisk changed and the image still fits
+  the BOOT partition exactly.
+
+Everything lands under ``out/``. Flashing is a separate, authorised step.
+"""
+import argparse
+import hashlib
+import importlib.util
+import json
+import struct
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[3]
+PARTITIONS = ('boot', 'dtbo', 'recovery', 'vbmeta')
+# New salt: the footer hash has no reason to repeat the ramdisk-only update.
+AVB_SALT = 'tabs7linux steamos 6.2 boot candidate'
+COMPONENTS = ('--kernel', '--ramdisk', '--dtb')
+
+
+def load(name, relative):
+    spec = importlib.util.spec_from_file_location(name, ROOT / relative)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def sha(data):
+    return hashlib.sha256(data if isinstance(data, bytes) else data.encode()).hexdigest()
+
+
+def file_sha(path):
+    return sha(Path(path).read_bytes())
+
+
+def display(path):
+    path = Path(path).resolve()
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def kernel_version(image_bytes):
+    marker = image_bytes.find(b'Linux version ')
+    if marker < 0:
+        raise ValueError('kernel Image has no version string')
+    return image_bytes[marker:image_bytes.find(b'\0', marker)].decode(errors='replace')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--snapshot', type=Path, required=True,
+                        help='same-boot snapshot with boot/dtbo/recovery/vbmeta')
+    parser.add_argument('--deployed-boot', type=Path, required=True,
+                        help='BOOT image on the device now (header and command line template)')
+    parser.add_argument('--kernel', type=Path, required=True, help='6.2 Image')
+    parser.add_argument('--dtb', type=Path, required=True, help='6.2 gts7lwifi DTB')
+    parser.add_argument('--ramdisk', type=Path, required=True, help='deployed initramfs.cpio.gz')
+    parser.add_argument('--output', type=Path, required=True, help='directory under out/')
+    args = parser.parse_args()
+
+    preflight = load('boot_preflight', 'scripts/build/vendor/preflight-steamos-boot.py')
+    builder = load('vendor_builder', 'scripts/build/vendor/build-vendor-linux.py')
+    update = load('update_linux_boot', 'scripts/build/vendor/update-linux-boot.py')
+    profile = json.loads((ROOT / 'hardware/samsung/gts7lwifi/profiles/'
+                          'gts7lwifi-recovery-bootstrap.json').read_text())
+
+    snapshot = Path(args.snapshot).resolve()
+    manifest = preflight.snapshot_manifest(snapshot)
+    checked = preflight.verify_snapshot(snapshot, manifest, profile, update.LAYOUT)
+    print(f'snapshot : {display(snapshot)} (layout, live DTB and identity verified)')
+
+    tools = Path(ROOT / 'out/tools')
+    avb = [sys.executable, str(tools / 'avb/avbtool.py')]
+    key = tools / 'avb/testkey_rsa4096.pem'
+    mktools = tools / 'mkbootimg'
+
+    deployed = Path(args.deployed_boot).resolve()
+    subprocess.run(avb + ['verify_image', '--image', str(deployed), '--key', str(key)],
+                   check=True, capture_output=True)
+    output = preflight.ensure_under_out(args.output)
+    if output.exists():
+        raise ValueError(f'output already exists: {output}')
+    output.mkdir(parents=True)
+
+    options = builder.unpack(mktools, deployed, output / 'template')
+    if options.get('--header_version') != '2' or '--recovery_dtbo' in options:
+        raise ValueError('deployed BOOT is not the reviewed header v2 Linux image')
+    original_options = dict(options)
+    print(f'deployed : {display(deployed)} ({file_sha(deployed)})')
+    print(f'template : header v2, command line {len(options.get("--cmdline", ""))} bytes')
+
+    kernel = Path(args.kernel).resolve()
+    dtb = Path(args.dtb).resolve()
+    ramdisk = Path(args.ramdisk).resolve()
+    version = kernel_version(kernel.read_bytes())
+    if '6.2' not in version.split()[2]:
+        raise ValueError(f'kernel is not 6.2: {version}')
+    if b'samsung,gts7l-nt36523' not in dtb.read_bytes():
+        raise ValueError('DTB does not contain the NT36523 panel node')
+    staged = {'kernel': output / kernel.name, 'dtb': output / dtb.name,
+              'ramdisk': output / ramdisk.name}
+    for component in (kernel, dtb, ramdisk):
+        (output / component.name).write_bytes(component.read_bytes())
+    print(f'kernel   : {version}')
+    print(f'dtb      : {display(dtb)} (panel node present)')
+
+    options['--kernel'] = str(output / kernel.name)
+    options['--dtb'] = str(output / dtb.name)
+    options['--ramdisk'] = str(output / ramdisk.name)
+    draft = output / 'boot-payload.img'
+    subprocess.run([sys.executable, str(mktools / 'mkbootimg.py'),
+                    *(part for pair in options.items() for part in pair),
+                    '--output', str(draft)], check=True)
+
+    rebuilt = builder.unpack(mktools, draft, output / 'rebuilt')
+    for name, value in original_options.items():
+        if name in COMPONENTS:
+            continue
+        if rebuilt.get(name) != value:
+            raise ValueError(f'boot header/command line changed: {name}')
+    for name, expected in (('kernel', kernel), ('dtb', dtb), ('ramdisk', ramdisk)):
+        if (output / 'rebuilt' / name).read_bytes() != expected.read_bytes():
+            raise ValueError(f'repacked component changed: {name}')
+
+    capacity = profile['device_pit']['partitions']['BOOT']['capacity_bytes']
+    if draft.stat().st_size > capacity:
+        raise ValueError(f'payload {draft.stat().st_size} exceeds BOOT capacity {capacity}')
+    original = checked['paths']['boot'].read_bytes()
+    vm_offset = struct.unpack_from('>Q', original, len(original) - 44)[0]
+    rollback = struct.unpack_from('>Q', original, vm_offset + 112)[0]
+    location = struct.unpack_from('>I', original, vm_offset + 124)[0]
+    signed = output / 'boot.img'
+    signed.write_bytes(draft.read_bytes())
+    subprocess.run(avb + ['add_hash_footer', '--image', str(signed),
+                          '--partition_size', str(capacity), '--partition_name', 'boot',
+                          '--algorithm', 'SHA256_RSA4096', '--key', str(key),
+                          '--rollback_index', str(rollback),
+                          '--rollback_index_location', str(location),
+                          '--salt', sha(AVB_SALT),
+                          '--prop', 'com.tabs7linux.boot.kind:mainline-6.2-steamos-candidate'],
+                   check=True, capture_output=True)
+    subprocess.run(avb + ['verify_image', '--image', str(signed), '--key', str(key)],
+                   check=True, capture_output=True)
+    if signed.stat().st_size != capacity:
+        raise ValueError(f'signed image is {signed.stat().st_size}, expected {capacity}')
+
+    components = {name: {'path': display(path), 'bytes': path.stat().st_size,
+                         'sha256': file_sha(path)} for name, path in staged.items()}
+    report = {
+        'kind': 'mainline 6.2 SteamOS BOOT candidate',
+        'image': display(signed), 'image_sha256': file_sha(signed),
+        'image_bytes': signed.stat().st_size, 'partition_capacity': capacity,
+        'template_boot': {'path': display(deployed), 'sha256': file_sha(deployed)},
+        'snapshot': {'path': display(snapshot), 'boot_id': checked['boot_id'],
+                     'partitions': {name: file_sha(checked['paths'][name]) for name in PARTITIONS}},
+        'components': components,
+        'kernel_version': version,
+        'header_and_commandline_preserved': True,
+        'hardware_boot_observed': False,
+        'device_write_performed': False,
+        'flash_requires_user_authorization': True,
+        'notes': [
+            'mainline 6.2 has never booted on this device',
+            'the initramfs is the deployed 4.19 one; it needs partlabel or PARTNAME for userdata',
+            'flash only with an authorised samloader write plus a readback comparison',
+        ],
+    }
+    (output / 'manifest.json').write_text(json.dumps(report, indent=2) + '\n')
+    print(f'boot.img : {display(signed)} {report["image_sha256"]}')
+    print(f'capacity : {capacity} bytes exactly; AVB footer verified')
+    print('nothing was written to the device')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        sys.exit(f'6.2 BOOT candidate failed: {error}')
