@@ -1,0 +1,47 @@
+{
+  "model": "SM-T870",
+  "device": "gts7lwifi",
+  "firmware": "T870XXS8DXH1",
+  "hardware_revision": "7",
+  "build_date": "2026-10-11",
+  "api": "https://download.lineageos.org/api/v2/devices/gts7lwifi/builds",
+  "instructions": "https://raw.githubusercontent.com/LineageOS/lineage_wiki/main/_includes/templates/device_specific/before_recovery_install_samsung_qcom.md",
+  "recovery_instructions": "https://raw.githubusercontent.com/LineageOS/lineage_wiki/main/_includes/templates/recovery_install_samloader_rs.md",
+  "data_reset_requires_user_authorization": true,
+  "device_pit": {
+    "path": "out/recovery-reference/device.pit",
+    "size": 16384,
+    "sha256": "1d6f97aa7f5813fc0b97df4e242a27b9f5bc3a081534c66524de87af6e37ad48",
+    "partition_block_bytes": 4096,
+    "partitions": {
+      "BOOT": {"id": 22, "block_count": 17408, "capacity_bytes": 71303168},
+      "DTBO": {"id": 21, "block_count": 2560, "capacity_bytes": 10485760},
+      "RECOVERY": {"id": 23, "block_count": 21213, "capacity_bytes": 86888448},
+      "VBMETA": {"id": 66, "block_count": 16, "capacity_bytes": 65536}
+    }
+  },
+  "files": {
+    "recovery": {
+      "path": "out/recovery-reference/lineage/recovery.img",
+      "size": 86888448,
+      "sha256": "54ae2d34a9bfdb30915ae08e07d2317197afc0087c492f0b763042e100ff702f",
+      "url": "https://mirrorbits.lineageos.org/full/gts7lwifi/20261011/recovery.img"
+    },
+    "vbmeta": {
+      "path": "out/recovery-reference/lineage/vbmeta.img",
+      "size": 8192,
+      "sha256": "63d13f4d294a1228a3e88e1a6c9d8a522f63f88b5f2c0181114c2a4718385e3d",
+      "url": "https://mirrorbits.lineageos.org/full/gts7lwifi/20261011/vbmeta.img",
+      "flags": 3
+    },
+    "samloader": {
+      "path": "out/tools/samloader-2.2.0/samloader",
+      "size": 8977392,
+      "sha256": "82a4692364aa185c9f3a68678bca5979f87b7ba3de3f02fceed6a0c83f336aaf",
+      "version": "2.2.0",
+      "release_url": "https://github.com/topjohnwu/samloader-rs/releases/tag/2.2.0",
+      "archive_url": "https://github.com/topjohnwu/samloader-rs/releases/download/2.2.0/samloader-v2.2.0-linux-x86_64.zip",
+      "archive_sha256": "f6029dcce75b8a66acc1975529085c53903f7cdb35505e0ac0a973f2652480ff"
+    }
+  }
+}

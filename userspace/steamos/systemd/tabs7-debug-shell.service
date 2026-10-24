@@ -1,0 +1,18 @@
+[Unit]
+Description=SM-T870 USB debug shell (telnet on RNDIS usb0)
+Documentation=file:///usr/local/lib/tabs7linux/steamos/README
+# Before sysinit and also wanted by emergency/rescue: reachable even when
+# local filesystems or later units fail.
+DefaultDependencies=no
+After=systemd-udevd.service
+Before=sysinit.target
+
+[Service]
+# The initramfs configured the gadget; the address survives switch_root.
+ExecStartPre=-/usr/local/lib/tabs7linux/bin/busybox ifconfig usb0 192.168.77.2 netmask 255.255.255.0 up
+ExecStart=/usr/local/lib/tabs7linux/bin/busybox telnetd -F -b 192.168.77.2 -l /bin/bash
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=sysinit.target emergency.target rescue.target

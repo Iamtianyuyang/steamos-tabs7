@@ -1,0 +1,195 @@
+{
+  "module_sha256": "c70a7c1105789be7f3679ec149108312d94d016dd2ff5d298cb8e8e0e9a5aef8",
+  "bytes": 724000,
+  "vermagic": "4.19.325-cip136-st20-perf-g4478511c4b37 SMP preempt mod_unload modversions aarch64",
+  "cfi_check_symbol_present": true,
+  "imports": [
+    {
+      "name": "module_layout",
+      "crc": "0x919b933b"
+    },
+    {
+      "name": "memcpy",
+      "crc": "0x4829a47e"
+    },
+    {
+      "name": "memset",
+      "crc": "0xdcb764ad"
+    },
+    {
+      "name": "__stack_chk_fail",
+      "crc": "0xf0fdf6cb"
+    },
+    {
+      "name": "__stack_chk_guard",
+      "crc": "0x8f678b07"
+    },
+    {
+      "name": "skb_put",
+      "crc": "0x1397c96c"
+    },
+    {
+      "name": "__alloc_skb",
+      "crc": "0xb1389003"
+    },
+    {
+      "name": "skb_dequeue",
+      "crc": "0xa0da5f7"
+    },
+    {
+      "name": "skb_queue_tail",
+      "crc": "0x1a2211c6"
+    },
+    {
+      "name": "skb_push",
+      "crc": "0x1e22184"
+    },
+    {
+      "name": "hci_recv_frame",
+      "crc": "0xbbb7282f"
+    },
+    {
+      "name": "skb_queue_purge",
+      "crc": "0x83396dd2"
+    },
+    {
+      "name": "kmalloc_caches",
+      "crc": "0x100e7566"
+    },
+    {
+      "name": "system_wq",
+      "crc": "0x2d3385d3"
+    },
+    {
+      "name": "cpu_hwcap_keys",
+      "crc": "0x5e2d7875"
+    },
+    {
+      "name": "arm64_const_caps_ready",
+      "crc": "0x14b89635"
+    },
+    {
+      "name": "tty_unregister_ldisc",
+      "crc": "0xa120d33c"
+    },
+    {
+      "name": "tty_unthrottle",
+      "crc": "0x256efb29"
+    },
+    {
+      "name": "__hci_cmd_sync",
+      "crc": "0xf19b2e21"
+    },
+    {
+      "name": "hci_alloc_dev",
+      "crc": "0xbc237890"
+    },
+    {
+      "name": "n_tty_ioctl_helper",
+      "crc": "0xa2fed79e"
+    },
+    {
+      "name": "tty_ldisc_flush",
+      "crc": "0xc4e7b9e3"
+    },
+    {
+      "name": "kfree",
+      "crc": "0x37a0cba"
+    },
+    {
+      "name": "percpu_free_rwsem",
+      "crc": "0xad85aed9"
+    },
+    {
+      "name": "hci_unregister_dev",
+      "crc": "0x911b7c2b"
+    },
+    {
+      "name": "kfree_skb",
+      "crc": "0x9d2388a6"
+    },
+    {
+      "name": "skb_pull",
+      "crc": "0x34e45e8b"
+    },
+    {
+      "name": "kmem_cache_alloc_trace",
+      "crc": "0xbe30a335"
+    },
+    {
+      "name": "tty_driver_flush_buffer",
+      "crc": "0xc166bd4e"
+    },
+    {
+      "name": "__percpu_init_rwsem",
+      "crc": "0x2a528e31"
+    },
+    {
+      "name": "tty_register_ldisc",
+      "crc": "0x5a4e0bda"
+    },
+    {
+      "name": "__percpu_up_read",
+      "crc": "0xda3165fd"
+    },
+    {
+      "name": "queue_work_on",
+      "crc": "0x4be4d8b"
+    },
+    {
+      "name": "preempt_schedule",
+      "crc": "0x43b0c9c3"
+    },
+    {
+      "name": "__percpu_down_read",
+      "crc": "0x993c9a2e"
+    },
+    {
+      "name": "tty_termios_encode_baud_rate",
+      "crc": "0x5641485b"
+    },
+    {
+      "name": "tty_set_termios",
+      "crc": "0x65d18610"
+    },
+    {
+      "name": "hci_free_dev",
+      "crc": "0xd5eaa31e"
+    },
+    {
+      "name": "__cfi_slowpath",
+      "crc": "0x2cd90edd"
+    },
+    {
+      "name": "cancel_work_sync",
+      "crc": "0x72394689"
+    },
+    {
+      "name": "percpu_up_write",
+      "crc": "0x7e2f2582"
+    },
+    {
+      "name": "percpu_down_write",
+      "crc": "0x90658993"
+    },
+    {
+      "name": "bt_err",
+      "crc": "0x7b8c32f1"
+    },
+    {
+      "name": "hci_register_dev",
+      "crc": "0xcc21de9e"
+    },
+    {
+      "name": "bt_info",
+      "crc": "0x718b8b7"
+    }
+  ],
+  "kernel_commit": "4478511c4b3738ad117e674810c2dfde154724bf",
+  "config_sha256": "02267534fad767e591c1c809523b8e589bb131c21d25c0731ade662a554d9117",
+  "hardware_controlled_load_tested": true,
+  "hardware_pairing_tested": true,
+  "pairing_evidence": "out/device/native-gnome/hardware/production-native-120/paired-state.json",
+  "pairing_scope": "phone_only",
+  "connected_tested": false
+}

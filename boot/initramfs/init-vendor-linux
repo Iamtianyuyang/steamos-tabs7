@@ -1,0 +1,118 @@
+#!/bin/sh
+# Native Linux bootstrap using the working Lineage 4.19 kernel.
+export PATH=/bin:/sbin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+# The reference kernel has no DEVTMPFS. Initial console nodes are also in cpio.
+mount -t tmpfs -o mode=0755 tmpfs /dev
+mknod -m 600 /dev/console c 5 1
+mknod -m 666 /dev/null c 1 3
+mknod -m 666 /dev/zero c 1 5
+mknod -m 666 /dev/tty c 5 0
+mknod -m 600 /dev/kmsg c 1 11
+# Reference cmdline uses console=null; opening /dev/console may fail ENODEV.
+# USB shells allocate their own terminal. PID 1 logs explicitly through kmsg.
+exec </dev/null >/dev/null 2>&1
+echo 'Tab S7 native vendor-kernel Linux reached BusyBox /init; Android init is absent' > /dev/kmsg
+mkdir -p /dev/pts /sys/kernel/config /sys/fs/pstore /run /etc
+cat > /etc/mdev.conf <<'EOF'
+null 0:0 0666
+zero 0:0 0666
+full 0:0 0666
+random 0:0 0666
+urandom 0:0 0666
+tty 0:0 0666
+ptmx 0:0 0666
+EOF
+mount -t devpts -o gid=5,mode=0620,ptmxmode=0666 devpts /dev/pts
+# Preserve prior crash records: this environment never removes pstore files.
+mount -t pstore pstore /sys/fs/pstore
+mount -t configfs configfs /sys/kernel/config
+echo /bin/mdev > /proc/sys/kernel/hotplug
+mdev -s
+ln -s /proc/self/fd /dev/fd
+ln -s /proc/self/fd/0 /dev/stdin
+ln -s /proc/self/fd/1 /dev/stdout
+ln -s /proc/self/fd/2 /dev/stderr
+uname -a > /run/uname.txt
+cat /proc/cmdline > /run/cmdline.txt
+cat /proc/mounts > /run/mounts.txt
+cat /proc/1/comm > /run/pid1.txt
+dmesg > /run/early-dmesg.txt
+
+# The built-in legacy Android gadget must stay disabled while configfs owns USB.
+if [ -e /sys/class/android_usb/android0/enable ]; then
+    echo 0 > /sys/class/android_usb/android0/enable
+fi
+gadget=/sys/kernel/config/usb_gadget/tabs7vendor
+mkdir -p "$gadget"
+echo 0x1d6b > "$gadget/idVendor"
+echo 0x0104 > "$gadget/idProduct"
+echo 0x0200 > "$gadget/bcdUSB"
+echo 0x0100 > "$gadget/bcdDevice"
+echo 0xEF > "$gadget/bDeviceClass"
+echo 0x02 > "$gadget/bDeviceSubClass"
+echo 0x01 > "$gadget/bDeviceProtocol"
+mkdir -p "$gadget/strings/0x409"
+echo tabs7-vendor-linux-4.19 > "$gadget/strings/0x409/serialnumber"
+echo 'Tab S7 Linux development' > "$gadget/strings/0x409/manufacturer"
+echo 'Native Linux 4.19 RNDIS and serial' > "$gadget/strings/0x409/product"
+mkdir -p "$gadget/configs/c.1/strings/0x409"
+echo 'RNDIS and serial' > "$gadget/configs/c.1/strings/0x409/configuration"
+echo 250 > "$gadget/configs/c.1/MaxPower"
+mkdir -p "$gadget/functions/rndis.usb0" "$gadget/functions/acm.usb0"
+echo 02:54:53:37:00:01 > "$gadget/functions/rndis.usb0/dev_addr"
+echo 02:54:53:37:00:02 > "$gadget/functions/rndis.usb0/host_addr"
+ln -s "$gadget/functions/rndis.usb0" "$gadget/configs/c.1/f1"
+ln -s "$gadget/functions/acm.usb0" "$gadget/configs/c.1/f2"
+while :; do
+    udc=$(ls /sys/class/udc | head -n 1)
+    if [ -z "$udc" ]; then
+        echo 'Vendor Linux waiting for USB controller' > /dev/kmsg
+    elif echo "$udc" > "$gadget/UDC"; then
+        echo 'Vendor Linux gadget bound to USB controller' > /dev/kmsg
+        break
+    else
+        echo 'Vendor Linux USB gadget bind failed; retrying' > /dev/kmsg
+    fi
+    sleep 2
+done
+while ! ifconfig usb0 192.168.77.2 netmask 255.255.255.0 up; do
+    echo 'Vendor Linux waiting to configure RNDIS network interface' > /dev/kmsg
+    sleep 2
+done
+mdev -s
+echo 'Vendor Linux USB configured at 192.168.77.2; pstore preserved at /sys/fs/pstore' > /dev/kmsg
+dmesg > /run/usb-dmesg.txt
+if ! telnetd -b 192.168.77.2 -l /bin/sh; then
+    echo 'Vendor Linux telnetd failed; serial shell remains available' > /dev/kmsg
+fi
+if [ -x /sbin/start-persistent-gui ] && /sbin/start-persistent-gui select-steamos; then
+    # SteamOS systemd becomes PID 1. Its own units recreate USB debug access;
+    # the RNDIS gadget and usb0 address persist in the kernel.
+    echo 'Vendor Linux switching root to SteamOS systemd' > /dev/kmsg
+    echo '' > /proc/sys/kernel/hotplug
+    /bin/busybox killall telnetd
+    mkdir -p /newroot/var/log/tabs7linux-initramfs
+    for record in /run/*.txt /run/*.log; do
+        [ -f "$record" ] && cat "$record" > "/newroot/var/log/tabs7linux-initramfs/${record##*/}"
+    done
+    sync
+    mount -o move /sys /newroot/sys
+    mount -o move /proc /newroot/proc
+    exec /bin/busybox switch_root /newroot /usr/lib/systemd/systemd
+fi
+if [ -x /sbin/start-persistent-gui ]; then
+    if /sbin/start-persistent-gui; then
+        # Ubuntu udev now owns hotplug and permissions; don't race it with mdev.
+        echo '' > /proc/sys/kernel/hotplug
+    else
+        echo 'Persistent GUI unavailable; native USB shells remain active' > /dev/kmsg
+    fi
+fi
+while :; do
+    if [ -c /dev/ttyGS0 ]; then
+        setsid sh -c 'exec sh </dev/ttyGS0 >/dev/ttyGS0 2>&1'
+    fi
+    sleep 1
+done

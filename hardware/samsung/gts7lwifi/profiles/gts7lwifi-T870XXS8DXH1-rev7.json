@@ -1,0 +1,289 @@
+{
+  "model": "SM-T870",
+  "firmware": "T870XXS8DXH1",
+  "hardware_revision": 7,
+  "source_archive": "AP_T870XXS8DXH1_T870XXS8DXH1_MQB84015341_REV00_user_low_ship_MULTI_CERT_meta_OS13.tar.md5",
+  "original_images": {
+    "boot.img": {
+      "size": 71303168,
+      "sha256": "f555ff2bb68180a49d4f5617946617f2728a22e536b863a4f2fd31933a4f7d72"
+    },
+    "recovery.img": {
+      "size": 86888448,
+      "sha256": "196fc83d3728e8be2c6ca36e38eb4388cbbc5c331f9e61beceeefc5124946942"
+    },
+    "dtbo.img": {
+      "size": 10485760,
+      "sha256": "790870ac11acd972c622b53e428934debc73c7c2a3721eedc64049481e11b162"
+    },
+    "vbmeta.img": {
+      "size": 9408,
+      "sha256": "2ce3ba7a3d721eb4b83075de5c37944a0056bf0f46210dda00839aae12fe7f46"
+    }
+  },
+  "base_dtb_sha256": "b3aeb34a66528accde7ff21e1739224aa89a327595b99ea781bf4eb7b195b422",
+  "overlay_sha256": "8a7f35f22f4af3893410a04fdebcb494e6885f6363b48102ca114a56131e690c",
+  "fixed_reservations": [
+    {
+      "name": "kaslr_region@A0001000",
+      "reg": [
+        0,
+        2684358656,
+        0,
+        4096
+      ]
+    },
+    {
+      "name": "hdm_region@9FB00000",
+      "reg": [
+        0,
+        2679111680,
+        0,
+        4096
+      ]
+    },
+    {
+      "name": "tima_region@B0100000",
+      "reg": [
+        0,
+        2953838592,
+        0,
+        1048576
+      ]
+    },
+    {
+      "name": "rkp_region@B0200000",
+      "reg": [
+        0,
+        2954887168,
+        0,
+        2097152
+      ]
+    },
+    {
+      "name": "ramoops@9FA00000",
+      "reg": [
+        0,
+        2678063104,
+        0,
+        1048576
+      ]
+    },
+    {
+      "name": "ss_plog_region@9F800000",
+      "reg": [
+        0,
+        2675965952,
+        0,
+        2097152
+      ]
+    },
+    {
+      "name": "sec_debug_rdx_bootdev@0",
+      "reg": [
+        1,
+        0,
+        0,
+        181403648
+      ]
+    },
+    {
+      "name": "sec_debug_region@0",
+      "reg": [
+        0,
+        2667577344,
+        0,
+        8388608
+      ]
+    },
+    {
+      "name": "hyp_region@80000000",
+      "reg": [
+        0,
+        2147483648,
+        0,
+        6291456
+      ]
+    },
+    {
+      "name": "xbl_aop_region@80700000",
+      "reg": [
+        0,
+        2153787392,
+        0,
+        2478080
+      ]
+    },
+    {
+      "name": "reserved-memory@80860000",
+      "reg": [
+        0,
+        2156265472,
+        0,
+        131072
+      ]
+    },
+    {
+      "name": "smem_region@80900000",
+      "reg": [
+        0,
+        2156920832,
+        0,
+        2097152
+      ]
+    },
+    {
+      "name": "removed_region@80b00000",
+      "reg": [
+        0,
+        2159017984,
+        0,
+        103809024
+      ]
+    },
+    {
+      "name": "pil_camera_region@86200000",
+      "reg": [
+        0,
+        2412773376,
+        0,
+        5242880
+      ]
+    },
+    {
+      "name": "pil_wlan_fw_region@86700000",
+      "reg": [
+        0,
+        2418016256,
+        0,
+        1048576
+      ]
+    },
+    {
+      "name": "pil_ipa_fw_region@86800000",
+      "reg": [
+        0,
+        2419064832,
+        0,
+        65536
+      ]
+    },
+    {
+      "name": "pil_ipa_gsi_region@86810000",
+      "reg": [
+        0,
+        2419130368,
+        0,
+        40960
+      ]
+    },
+    {
+      "name": "pil_gpu_region@8681a000",
+      "reg": [
+        0,
+        2419171328,
+        0,
+        8192
+      ]
+    },
+    {
+      "name": "pil_npu_region@86900000",
+      "reg": [
+        0,
+        2369781760,
+        0,
+        5242880
+      ]
+    },
+    {
+      "name": "pil_video_region@86e00000",
+      "reg": [
+        0,
+        2375024640,
+        0,
+        5242880
+      ]
+    },
+    {
+      "name": "pil_cvp_region@87300000",
+      "reg": [
+        0,
+        2380267520,
+        0,
+        5242880
+      ]
+    },
+    {
+      "name": "pil_cdsp_region@87800000",
+      "reg": [
+        0,
+        2385510400,
+        0,
+        27262976
+      ]
+    },
+    {
+      "name": "pil_slpi_region@88c00000",
+      "reg": [
+        0,
+        2300575744,
+        0,
+        22020096
+      ]
+    },
+    {
+      "name": "pil_adsp_region@8a100000",
+      "reg": [
+        0,
+        2322595840,
+        0,
+        46137344
+      ]
+    },
+    {
+      "name": "pil_spss_region@8be00000",
+      "reg": [
+        0,
+        2368733184,
+        0,
+        1048576
+      ]
+    },
+    {
+      "name": "cdsp_secure_heap@8bf00000",
+      "reg": [
+        0,
+        2420113408,
+        0,
+        6291456
+      ]
+    },
+    {
+      "name": "cont_splash_region@9c000000",
+      "reg": [
+        0,
+        2617245696,
+        0,
+        36700160
+      ]
+    },
+    {
+      "name": "disp_rdump_region@9c000000",
+      "reg": [
+        0,
+        2617245696,
+        0,
+        20480000
+      ]
+    },
+    {
+      "name": "dfps_data_region@9e300000",
+      "reg": [
+        0,
+        2653945856,
+        0,
+        1048576
+      ]
+    }
+  ]
+}

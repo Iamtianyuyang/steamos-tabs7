@@ -1,0 +1,473 @@
+--- a/include/backend/drm/drm.h
++++ b/include/backend/drm/drm.h
+@@ -116,6 +116,15 @@
+ 	struct wlr_drm_format_set mgpu_formats;
+ 
+ 	bool supports_tearing_page_flips;
++
++	// Private, opt-in SM-T870 scanout profile; reserved for this backend's lifetime.
++	bool sm_t870_split;
++	uint32_t sm_t870_plane_ids[2];
++	struct wlr_drm_plane *sm_t870_planes[2];
++	struct wlr_drm_crtc *sm_t870_crtc;
++	uint32_t sm_t870_crtc_mask;
++	uint32_t sm_t870_reserved_crtcs;
++	struct wlr_drm_format_set sm_t870_formats;
+ };
+ 
+ struct wlr_drm_mode {
+--- a/include/backend/drm/properties.h
++++ b/include/backend/drm/properties.h
+@@ -65,8 +65,10 @@
+ 		uint32_t fb_id;
+ 		uint32_t crtc_id;
+ 		uint32_t fb_damage_clips;
++		uint32_t capabilities; // Qualcomm SDE immutable blob, optional
++		uint32_t zpos; // Not guaranteed to exist
+ 	};
+-	uint32_t props[14];
++	uint32_t props[16];
+ };
+ 
+ bool get_drm_connector_props(int fd, uint32_t id,
+--- a/include/backend/drm/renderer.h
++++ b/include/backend/drm/renderer.h
+@@ -31,6 +31,8 @@
+ 	struct wl_list link; // wlr_drm_backend.fbs
+ 
+ 	uint32_t id;
++	uint32_t format;
++	uint64_t modifier;
+ };
+ 
+ bool init_drm_renderer(struct wlr_drm_backend *drm,
+--- a/backend/drm/properties.c
++++ b/backend/drm/properties.c
+@@ -59,8 +59,10 @@
+ 	{ "SRC_W", INDEX(src_w) },
+ 	{ "SRC_X", INDEX(src_x) },
+ 	{ "SRC_Y", INDEX(src_y) },
++	{ "capabilities", INDEX(capabilities) },
+ 	{ "rotation", INDEX(rotation) },
+ 	{ "type", INDEX(type) },
++	{ "zpos", INDEX(zpos) },
+ #undef INDEX
+ };
+ 
+--- a/backend/drm/renderer.c
++++ b/backend/drm/renderer.c
+@@ -376,6 +376,8 @@
+ 
+ 	fb->backend = drm;
+ 	fb->wlr_buf = buf;
++	fb->format = attribs.format;
++	fb->modifier = attribs.modifier;
+ 
+ 	wlr_addon_init(&fb->addon, &buf->addons, drm, &fb_addon_impl);
+ 	wl_list_insert(&drm->fbs, &fb->link);
+--- a/backend/drm/drm.c
++++ b/backend/drm/drm.c
+@@ -124,6 +124,40 @@
+ 			drm->addfb2_modifiers ? "supported" : "unsupported");
+ 	}
+ 
++	const char *split = getenv("WLR_DRM_SM_T870_SPLIT");
++	if (split != NULL && strcmp(split, "0") != 0) {
++		char *end;
++		uint32_t ids[2];
++		for (size_t i = 0; i < 2; i++) {
++			if (*split < '0' || *split > '9') {
++				wlr_log(WLR_ERROR, "WLR_DRM_SM_T870_SPLIT requires two plane IDs");
++				return false;
++			}
++			errno = 0;
++			unsigned long id = strtoul(split, &end, 10);
++			if (errno != 0 || id == 0 || id > UINT32_MAX ||
++					(i == 0 ? *end != ',' : *end != '\0')) {
++				wlr_log(WLR_ERROR, "Invalid WLR_DRM_SM_T870_SPLIT plane IDs");
++				return false;
++			}
++			ids[i] = id;
++			split = end + (i == 0 ? 1 : 0);
++		}
++		drmVersion *version = drmGetVersion(drm->fd);
++		bool supported = version != NULL && version->name != NULL &&
++			strcmp(version->name, "msm_drm") == 0;
++		if (version != NULL) {
++			drmFreeVersion(version);
++		}
++		if (!supported || drm->parent != NULL || drm->iface != &atomic_iface ||
++				ids[0] == ids[1]) {
++			wlr_log(WLR_ERROR, "SM-T870 split requires msm_drm, atomic, one GPU and distinct planes");
++			return false;
++		}
++		drm->sm_t870_split = true;
++		memcpy(drm->sm_t870_plane_ids, ids, sizeof(ids));
++	}
++
+ 	return true;
+ }
+ 
+@@ -245,6 +279,152 @@
+ 	return false;
+ }
+ 
++// Require a real Qualcomm VIG (not a virtual smart plane) and the zpos
++// contract verified on this panel. Property IDs are discovered on every boot.
++static bool sm_t870_plane_valid(struct wlr_drm_backend *drm,
++		struct wlr_drm_plane *plane) {
++	const union wlr_drm_plane_props *p = &plane->props;
++	if (plane->type == DRM_PLANE_TYPE_CURSOR || p->capabilities == 0 ||
++			p->zpos == 0 || p->fb_id == 0 || p->crtc_id == 0 ||
++			p->src_x == 0 || p->src_y == 0 || p->src_w == 0 || p->src_h == 0 ||
++			p->crtc_x == 0 || p->crtc_y == 0 || p->crtc_w == 0 || p->crtc_h == 0) {
++		return false;
++	}
++	drmModePropertyRes *zpos = drmModeGetProperty(drm->fd, p->zpos);
++	bool zpos_ok = zpos != NULL && !(zpos->flags & DRM_MODE_PROP_IMMUTABLE) &&
++		(zpos->flags & DRM_MODE_PROP_RANGE) && zpos->count_values == 2 &&
++		zpos->values[0] == 0;
++	drmModeFreeProperty(zpos);
++	if (!zpos_ok) {
++		return false;
++	}
++	size_t len = 0;
++	char *blob = get_drm_prop_blob(drm->fd, plane->id, p->capabilities, &len);
++	if (blob == NULL || len == 0 || len > 65536) {
++		free(blob);
++		return false;
++	}
++	char *caps = strndup(blob, len);
++	free(blob);
++	bool valid = caps != NULL && strstr(caps, "scaler_step_ver=") != NULL &&
++		strstr(caps, "primary_smart_plane_id=") == NULL;
++	free(caps);
++	return valid;
++}
++
++static bool init_sm_t870_split(struct wlr_drm_backend *drm, drmModeRes *res) {
++	if (!drm->sm_t870_split) {
++		return true;
++	}
++	if (drm->num_crtcs > 32) {
++		return false;
++	}
++	struct wlr_drm_plane *pair[2] = {0};
++	uint32_t common = UINT32_MAX, reserved = 0;
++	for (size_t i = 0; i < 2; i++) {
++		for (size_t j = 0; j < drm->num_planes; j++) {
++			if (drm->planes[j].id == drm->sm_t870_plane_ids[i]) {
++				pair[i] = &drm->planes[j];
++				break;
++			}
++		}
++		if (pair[i] == NULL || !sm_t870_plane_valid(drm, pair[i])) {
++			wlr_log(WLR_ERROR, "SM-T870 plane %"PRIu32" is not a real VIG with writable zpos=0",
++				drm->sm_t870_plane_ids[i]);
++			return false;
++		}
++		drmModePlane *p = drmModeGetPlane(drm->fd, pair[i]->id);
++		if (p == NULL) {
++			return false;
++		}
++		common &= p->possible_crtcs;
++		// Existing live bindings must agree. Never move a plane from a live
++		// unrelated CRTC. A zero FB is not proof of logical availability.
++		if (p->crtc_id != 0) {
++			uint32_t bound = 0;
++			for (size_t j = 0; j < drm->num_crtcs; j++) {
++				if (drm->crtcs[j].id == p->crtc_id) {
++					bound = UINT32_C(1) << j;
++				}
++			}
++			common &= bound;
++		}
++		drmModeFreePlane(p);
++		for (size_t j = 0; j < drm->num_crtcs; j++) {
++			if (drm->crtcs[j].cursor == pair[i]) {
++				return false;
++			}
++			if (drm->crtcs[j].primary == pair[i]) {
++				reserved |= UINT32_C(1) << j;
++			}
++		}
++	}
++
++	// Restrict the pair to the actual DSI-1 encoder. Refuse other live
++	// connectors on the selected CRTC rather than stealing their planes.
++	uint32_t dsi_mask = 0, other_live = 0;
++	for (int i = 0; i < res->count_connectors; i++) {
++		drmModeConnector *c = drmModeGetConnector(drm->fd, res->connectors[i]);
++		if (c == NULL) {
++			return false;
++		}
++		bool dsi = c->connector_type == DRM_MODE_CONNECTOR_DSI &&
++			c->connector_type_id == 1 && c->connection == DRM_MODE_CONNECTED;
++		for (int j = 0; j < c->count_encoders; j++) {
++			drmModeEncoder *e = drmModeGetEncoder(drm->fd, c->encoders[j]);
++			if (e == NULL) {
++				drmModeFreeConnector(c);
++				return false;
++			}
++			if (dsi) {
++				dsi_mask |= e->possible_crtcs;
++			} else if (c->encoder_id == e->encoder_id && e->crtc_id != 0) {
++				for (size_t k = 0; k < drm->num_crtcs; k++) {
++					if (drm->crtcs[k].id == e->crtc_id) {
++						other_live |= UINT32_C(1) << k;
++					}
++				}
++			}
++			drmModeFreeEncoder(e);
++		}
++		drmModeFreeConnector(c);
++	}
++	common &= dsi_mask & ~other_live;
++	struct wlr_drm_crtc *target = NULL;
++	uint32_t target_mask = 0;
++	for (size_t i = 0; i < drm->num_crtcs; i++) {
++		uint32_t bit = UINT32_C(1) << i;
++		if ((common & bit) && drm->crtcs[i].primary != NULL) {
++			target = &drm->crtcs[i];
++			target_mask = bit;
++			break;
++		}
++	}
++	if (target == NULL || (reserved & other_live) != 0) {
++		wlr_log(WLR_ERROR, "SM-T870 VIG pair has no available common DSI-1 CRTC");
++		return false;
++	}
++	if (target->primary->initial_crtc_id != 0 &&
++			target->primary->initial_crtc_id != target->id) {
++		return false;
++	}
++	struct wlr_drm_format_set formats = {0};
++	if (!wlr_drm_format_set_intersect(&formats, &pair[0]->formats, &pair[1]->formats)) {
++		wlr_drm_format_set_finish(&formats);
++		wlr_log(WLR_ERROR, "SM-T870 VIG pair has no common formats");
++		return false;
++	}
++	drm->sm_t870_planes[0] = pair[0];
++	drm->sm_t870_planes[1] = pair[1];
++	drm->sm_t870_crtc = target;
++	drm->sm_t870_crtc_mask = target_mask;
++	drm->sm_t870_reserved_crtcs = reserved | target_mask;
++	drm->sm_t870_formats = formats;
++	wlr_log(WLR_INFO, "SM-T870 split: DSI-1, CRTC %"PRIu32", VIG planes %"PRIu32"/%"PRIu32,
++		target->id, pair[0]->id, pair[1]->id);
++	return true;
++}
++
+ bool init_drm_resources(struct wlr_drm_backend *drm) {
+ 	drmModeRes *res = drmModeGetResources(drm->fd);
+ 	if (!res) {
+@@ -257,7 +437,7 @@
+ 	drm->num_crtcs = res->count_crtcs;
+ 	if (drm->num_crtcs == 0) {
+ 		drmModeFreeResources(res);
+-		return true;
++		return !drm->sm_t870_split;
+ 	}
+ 
+ 	drm->crtcs = calloc(drm->num_crtcs, sizeof(drm->crtcs[0]));
+@@ -289,14 +469,24 @@
+ 		goto error_crtcs;
+ 	}
+ 
++	if (!init_sm_t870_split(drm, res)) {
++		goto error_planes;
++	}
++
+ 	if (drm->iface->init != NULL && !drm->iface->init(drm)) {
+-		goto error_crtcs;
++		goto error_planes;
+ 	}
+ 
+ 	drmModeFreeResources(res);
+ 
+ 	return true;
+ 
++error_planes:
++	wlr_drm_format_set_finish(&drm->sm_t870_formats);
++	for (size_t i = 0; i < drm->num_planes; i++) {
++		wlr_drm_format_set_finish(&drm->planes[i].formats);
++	}
++	free(drm->planes);
+ error_crtcs:
+ 	free(drm->crtcs);
+ error_res:
+@@ -308,6 +498,8 @@
+ 	if (!drm) {
+ 		return;
+ 	}
++
++	wlr_drm_format_set_finish(&drm->sm_t870_formats);
+ 
+ 	if (drm->iface->finish != NULL) {
+ 		drm->iface->finish(drm);
+@@ -575,8 +767,11 @@
+ 		local_buf = wlr_buffer_lock(source_buf);
+ 	}
+ 
+-	bool ok = drm_fb_import(&state->primary_fb, drm, local_buf,
+-		&plane->formats);
++	const struct wlr_drm_format_set *formats = &plane->formats;
++	if (drm->sm_t870_split && strcmp(conn->name, "DSI-1") == 0) {
++		formats = &drm->sm_t870_formats;
++	}
++	bool ok = drm_fb_import(&state->primary_fb, drm, local_buf, formats);
+ 	wlr_buffer_unlock(local_buf);
+ 	if (!ok) {
+ 		wlr_drm_conn_log(conn, WLR_DEBUG,
+@@ -1115,6 +1310,9 @@
+ 	}
+ 	if (conn->backend->parent) {
+ 		return &conn->backend->mgpu_formats;
++	}
++	if (conn->backend->sm_t870_split && strcmp(conn->name, "DSI-1") == 0) {
++		return &conn->backend->sm_t870_formats;
+ 	}
+ 	return &conn->crtc->primary->formats;
+ }
+@@ -1239,6 +1437,10 @@
+ 
+ 		if (conn->status == DRM_MODE_CONNECTED && want_crtc) {
+ 			connector_constraints[i] = conn->possible_crtcs;
++			if (drm->sm_t870_split) {
++				connector_constraints[i] &= strcmp(conn->name, "DSI-1") == 0 ?
++					drm->sm_t870_crtc_mask : ~drm->sm_t870_reserved_crtcs;
++			}
+ 		} else {
+ 			// Will always fail to match anything
+ 			connector_constraints[i] = 0;
+@@ -1846,6 +2048,11 @@
+ 			return NULL;
+ 		}
+ 
++		if (drm->sm_t870_split && strcmp(conn->name, "DSI-1") == 0) {
++			wlr_log(WLR_ERROR, "SM-T870 split reserves DSI-1; leasing it is unsupported");
++			return NULL;
++		}
++
+ 		objects[n_objects++] = conn->id;
+ 		wlr_log(WLR_DEBUG, "Connector %d", conn->id);
+ 
+--- a/backend/drm/atomic.c
++++ b/backend/drm/atomic.c
+@@ -2,6 +2,7 @@
+ #include <drm_fourcc.h>
+ #include <stdlib.h>
+ #include <stdio.h>
++#include <string.h>
+ #include <wlr/util/log.h>
+ #include <xf86drm.h>
+ #include <xf86drmMode.h>
+@@ -231,7 +232,7 @@
+ 
+ static void set_plane_props(struct atomic *atom, struct wlr_drm_backend *drm,
+ 		struct wlr_drm_plane *plane, struct wlr_drm_fb *fb, uint32_t crtc_id,
+-		int32_t x, int32_t y) {
++		int32_t x, int32_t y, uint32_t src_x, uint32_t src_width) {
+ 	uint32_t id = plane->id;
+ 	const union wlr_drm_plane_props *props = &plane->props;
+ 
+@@ -243,9 +244,16 @@
+ 
+ 	uint32_t width = fb->wlr_buf->width;
+ 	uint32_t height = fb->wlr_buf->height;
++	if (src_width != 0) {
++		if (src_x > width || src_width > width - src_x) {
++			atom->failed = true;
++			return;
++		}
++		width = src_width;
++	}
+ 
+ 	// The src_* properties are in 16.16 fixed point
+-	atomic_add(atom, id, props->src_x, 0);
++	atomic_add(atom, id, props->src_x, (uint64_t)src_x << 16);
+ 	atomic_add(atom, id, props->src_y, 0);
+ 	atomic_add(atom, id, props->src_w, (uint64_t)width << 16);
+ 	atomic_add(atom, id, props->src_h, (uint64_t)height << 16);
+@@ -266,6 +274,19 @@
+ 
+ 	bool modeset = state->modeset;
+ 	bool active = state->active;
++	bool split = drm->sm_t870_split && strcmp(conn->name, "DSI-1") == 0;
++	if (split) {
++		struct wlr_drm_fb *fb = state->primary_fb;
++		// This also validates cached/retained FBs on resume and commits without
++		// a new BUFFER flag. The stored format reflects AddFB's alpha fallback.
++		if (crtc != drm->sm_t870_crtc || (active &&
++				(state->mode.hdisplay != 1600 || state->mode.vdisplay != 2560 ||
++				fb == NULL || fb->wlr_buf->width != 1600 || fb->wlr_buf->height != 2560 ||
++				!wlr_drm_format_set_has(&drm->sm_t870_formats, fb->format, fb->modifier)))) {
++			wlr_drm_conn_log(conn, WLR_ERROR, "SM-T870 split requires a 1600x2560 mode and common VIG framebuffer");
++			return false;
++		}
++	}
+ 
+ 	uint32_t mode_id = crtc->mode_id;
+ 	if (modeset) {
+@@ -294,7 +315,7 @@
+ 	}
+ 
+ 	uint32_t fb_damage_clips = 0;
+-	if ((state->base->committed & WLR_OUTPUT_STATE_DAMAGE) &&
++	if (!split && (state->base->committed & WLR_OUTPUT_STATE_DAMAGE) &&
+ 			crtc->primary->props.fb_damage_clips != 0) {
+ 		create_fb_damage_clips_blob(drm, state->primary_fb->wlr_buf->width,
+ 			state->primary_fb->wlr_buf->height, &state->base->damage, &fb_damage_clips);
+@@ -343,22 +364,45 @@
+ 		if (crtc->props.vrr_enabled != 0) {
+ 			atomic_add(&atom, crtc->id, crtc->props.vrr_enabled, vrr_enabled);
+ 		}
+-		set_plane_props(&atom, drm, crtc->primary, state->primary_fb, crtc->id,
+-			0, 0);
+-		if (crtc->primary->props.fb_damage_clips != 0) {
+-			atomic_add(&atom, crtc->primary->id,
+-				crtc->primary->props.fb_damage_clips, fb_damage_clips);
++		if (split) {
++			for (size_t i = 0; i < 2; i++) {
++				struct wlr_drm_plane *plane = drm->sm_t870_planes[i];
++				set_plane_props(&atom, drm, plane, state->primary_fb, crtc->id,
++					800 * i, 0, 800 * i, 800);
++				atomic_add(&atom, plane->id, plane->props.zpos, 0);
++				if (plane->props.fb_damage_clips != 0) {
++					atomic_add(&atom, plane->id, plane->props.fb_damage_clips, 0);
++				}
++			}
++			if (crtc->primary != drm->sm_t870_planes[0] &&
++					crtc->primary != drm->sm_t870_planes[1]) {
++				plane_disable(&atom, crtc->primary);
++			}
++		} else {
++			set_plane_props(&atom, drm, crtc->primary, state->primary_fb, crtc->id,
++				0, 0, 0, 0);
++			if (crtc->primary->props.fb_damage_clips != 0) {
++				atomic_add(&atom, crtc->primary->id,
++					crtc->primary->props.fb_damage_clips, fb_damage_clips);
++			}
+ 		}
+ 		if (crtc->cursor) {
+ 			if (drm_connector_is_cursor_visible(conn)) {
+ 				set_plane_props(&atom, drm, crtc->cursor, get_next_cursor_fb(conn),
+-					crtc->id, conn->cursor_x, conn->cursor_y);
++					crtc->id, conn->cursor_x, conn->cursor_y, 0, 0);
+ 			} else {
+ 				plane_disable(&atom, crtc->cursor);
+ 			}
+ 		}
+ 	} else {
+-		plane_disable(&atom, crtc->primary);
++		if (split) {
++			plane_disable(&atom, drm->sm_t870_planes[0]);
++			plane_disable(&atom, drm->sm_t870_planes[1]);
++		}
++		if (!split || (crtc->primary != drm->sm_t870_planes[0] &&
++				crtc->primary != drm->sm_t870_planes[1])) {
++			plane_disable(&atom, crtc->primary);
++		}
+ 		if (crtc->cursor) {
+ 			plane_disable(&atom, crtc->cursor);
+ 		}

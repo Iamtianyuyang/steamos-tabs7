@@ -1,0 +1,35 @@
+--- a/meson.build
++++ b/meson.build
+@@ -296,6 +296,9 @@
+       warning('As a side-effect, Turnip is forced to link with libdrm when built alongside Gallium DRM drivers which platforms such as Android may not have available at runtime.')
+   elif _vulkan_drivers != [ 'freedreno' ]
+       warning('Turnip is forced to link with libdrm when built alongside other Vulkan drivers which platforms such as Android may not have available at runtime.')
++  elif host_machine.system() == 'linux' and freedreno_kmds == ['kgsl'] and get_option('platforms').contains('wayland')
++    # KGSL rendering still needs common DRM image buffers for Wayland WSI.
++    system_has_kms_drm = true
+   else
+     # If DRM support isn't needed, we can get rid of it since linking
+     # to libdrm can be a potential compatibility hazard.
+--- a/src/vulkan/meson.build
++++ b/src/vulkan/meson.build
+@@ -54,7 +54,8 @@
+   vulkan_wsi_deps += dep_wayland_client
+   vulkan_wsi_list += '-DVK_USE_PLATFORM_WAYLAND_KHR'
+ endif
+-if system_has_kms_drm and not with_platform_android
++# KGSL has dma-buf images, but cannot implement direct KHR_display.
++if system_has_kms_drm and not with_platform_android and not (with_freedreno_vk and freedreno_kmds == ['kgsl'])
+   vulkan_wsi_deps += [dep_libdrm]
+   vulkan_wsi_list += '-DVK_USE_PLATFORM_DISPLAY_KHR'
+ endif
+--- a/src/vulkan/wsi/meson.build
++++ b/src/vulkan/wsi/meson.build
+@@ -37,7 +37,7 @@
+   files_vulkan_wsi += files('wsi_common_metal.c', 'wsi_common_metal_layer.m')
+ endif
+ 
+-if system_has_kms_drm and not with_platform_android
++if vulkan_wsi_list.contains('-DVK_USE_PLATFORM_DISPLAY_KHR')
+   files_vulkan_wsi += files('wsi_common_display.c')
+ endif
+ 

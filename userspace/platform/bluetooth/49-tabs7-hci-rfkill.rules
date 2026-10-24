@@ -1,0 +1,7 @@
+// Native BusyBox has no logind active-seat classification. This single helper
+// validates ttyHS0/hci0 and accepts only a Boolean software-block operation.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.tabs7linux.hci-rfkill" && subject.user === "linux") {
+        return polkit.Result.YES;
+    }
+});

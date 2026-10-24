@@ -1,0 +1,27 @@
+[Unit]
+Description=SM-T870 Game Mode (gamescope DRM two-VIG scanout + Steam)
+Documentation=file:///usr/local/lib/tabs7linux/steamos/README
+After=systemd-user-sessions.service systemd-logind.service seatd.service dbus.service
+Wants=seatd.service
+# Leave the console free for this session only.
+Conflicts=getty@tty1.service
+
+[Service]
+User=steamos
+# A logind session: XDG_RUNTIME_DIR, the user manager and its PipeWire.
+PAMName=login
+# seatd (SteamOS seatd.service) hands out DRM and input without a VT.
+SupplementaryGroups=seat
+WorkingDirectory=~
+# This image is the Steam Frame "vr" variant; Steam then drives a VR runtime
+# and only hovers on touch/mouse input. The session alone sees os-release
+# without the VARIANT lines; the system identity stays unchanged.
+BindReadOnlyPaths=/usr/local/lib/tabs7linux/steamos/os-release:/usr/lib/os-release
+ExecStart=/usr/local/lib/tabs7linux/steamos/gamescope-session
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillMode=mixed
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,51 @@
+--- a/include/render/gles2.h
++++ b/include/render/gles2.h
+@@ -43,6 +43,10 @@
+ 	float projection[9];
+ 	struct wlr_egl *egl;
+ 	int drm_fd;
++
++	// SM-T870 KGSL scanout completion workaround; private, opt-in state.
++	bool sm_t870_render_finish;
++	bool sm_t870_render_finish_logged;
+ 
+ 	const char *exts_str;
+ 	struct {
+--- a/render/gles2/renderer.c
++++ b/render/gles2/renderer.c
+@@ -839,6 +839,10 @@
+ 	renderer->exts_str = exts_str;
+ 	renderer->drm_fd = -1;
+ 
++	const char *render_finish = getenv("TABS7_WLROOTS_RENDER_FINISH");
++	renderer->sm_t870_render_finish = render_finish != NULL &&
++		strcmp(render_finish, "1") == 0;
++
+ 	wlr_log(WLR_INFO, "Creating GLES2 renderer");
+ 	wlr_log(WLR_INFO, "Using %s", glGetString(GL_VERSION));
+ 	wlr_log(WLR_INFO, "GL vendor: %s", glGetString(GL_VENDOR));
+--- a/render/gles2/pass.c
++++ b/render/gles2/pass.c
+@@ -1,5 +1,6 @@
+ #define _POSIX_C_SOURCE 199309L
+ #include <stdlib.h>
++#include <stdio.h>
+ #include <assert.h>
+ #include <pixman.h>
+ #include <time.h>
+@@ -37,6 +38,15 @@
+ 	}
+ 
+ 	glFlush();
++	if (renderer->sm_t870_render_finish) {
++		// Complete SM-T870 KGSL rendering before submitting this buffer
++		// for scanout; glFlush alone leaves its writes in flight.
++		glFinish();
++		if (!renderer->sm_t870_render_finish_logged) {
++			fprintf(stderr, "tabs7linux: SM-T870 GLES2 render completion wait active\n");
++			renderer->sm_t870_render_finish_logged = true;
++		}
++	}
+ 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+ 
+ 	pop_gles2_debug(renderer);

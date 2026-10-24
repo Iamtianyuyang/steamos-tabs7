@@ -1,0 +1,162 @@
+--- a/net/bluetooth/hci_sock.c
++++ b/net/bluetooth/hci_sock.c
+@@ -39,7 +39,7 @@
+ static LIST_HEAD(mgmt_chan_list);
+ static DEFINE_MUTEX(mgmt_chan_list_lock);
+ 
+-// static DEFINE_IDA(sock_cookie_ida);
++static DEFINE_IDA(sock_cookie_ida);
+ 
+ static atomic_t monitor_promisc = ATOMIC_INIT(0);
+ 
+@@ -95,7 +95,6 @@
+ 	return hci_pi(sk)->cookie;
+ }
+ 
+-#if 0
+ static bool hci_sock_gen_cookie(struct sock *sk)
+ {
+ 	int id = hci_pi(sk)->cookie;
+@@ -122,7 +121,6 @@
+ 		ida_simple_remove(&sock_cookie_ida, id);
+ 	}
+ }
+-#endif
+ 
+ static inline int hci_test_bit(int nr, const void *addr)
+ {
+@@ -494,7 +492,6 @@
+ 	return skb;
+ }
+ 
+-#if 0
+ static struct sk_buff *create_monitor_ctrl_open(struct sock *sk)
+ {
+ 	struct hci_mon_hdr *hdr;
+@@ -590,7 +587,6 @@
+ 
+ 	return skb;
+ }
+-#endif
+ 
+ static struct sk_buff *create_monitor_ctrl_command(struct sock *sk, u16 index,
+ 						   u16 opcode, u16 len,
+@@ -619,7 +615,6 @@
+ 	return skb;
+ }
+ 
+-#if 0
+ static void __printf(2, 3)
+ send_monitor_note(struct sock *sk, const char *fmt, ...)
+ {
+@@ -713,7 +708,6 @@
+ 
+ 	read_unlock(&hci_sk_list.lock);
+ }
+-#endif
+ 
+ /* Generate internal stack event */
+ static void hci_si_event(struct hci_dev *hdev, int type, int dlen, void *data)
+@@ -834,7 +828,6 @@
+ 
+ static int hci_sock_release(struct socket *sock)
+ {
+-#if 0
+ 	struct sock *sk = sock->sk;
+ 	struct hci_dev *hdev;
+ 	struct sk_buff *skb;
+@@ -891,11 +884,9 @@
+ 	sock_orphan(sk);
+ 	release_sock(sk);
+ 	sock_put(sk);
+-#endif
+ 	return 0;
+ }
+ 
+-#if 0
+ static int hci_sock_blacklist_add(struct hci_dev *hdev, void __user *arg)
+ {
+ 	bdaddr_t bdaddr;
+@@ -973,13 +964,10 @@
+ 
+ 	return -ENOIOCTLCMD;
+ }
+-#endif
+ 
+ static int hci_sock_ioctl(struct socket *sock, unsigned int cmd,
+ 			  unsigned long arg)
+ {
+-#if 0
+-{	
+ 	void __user *argp = (void __user *)arg;
+ 	struct sock *sk = sock->sk;
+ 	int err;
+@@ -1104,14 +1092,11 @@
+ done:
+ 	release_sock(sk);
+ 	return err;
+-#endif
+-	return 0;
+ }
+ 
+ static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,
+ 			 int addr_len)
+ {
+-#if 0
+ 	struct sockaddr_hci haddr;
+ 	struct sock *sk = sock->sk;
+ 	struct hci_dev *hdev = NULL;
+@@ -1403,14 +1388,11 @@
+ done:
+ 	release_sock(sk);
+ 	return err;
+-#endif
+-    return 0;
+ }
+ 
+ static int hci_sock_getname(struct socket *sock, struct sockaddr *addr,
+ 			    int peer)
+ {
+-#if 0
+ 	struct sockaddr_hci *haddr = (struct sockaddr_hci *)addr;
+ 	struct sock *sk = sock->sk;
+ 	struct hci_dev *hdev;
+@@ -1437,8 +1419,6 @@
+ done:
+ 	release_sock(sk);
+ 	return err;
+-#endif
+-    return 0;
+ }
+ 
+ static void hci_sock_cmsg(struct sock *sk, struct msghdr *msg,
+@@ -2037,13 +2017,11 @@
+ 	return err;
+ }
+ 
+-#if 0
+ static void hci_sock_destruct(struct sock *sk)
+ {
+ 	skb_queue_purge(&sk->sk_receive_queue);
+ 	skb_queue_purge(&sk->sk_write_queue);
+ }
+-#endif
+ 
+ static const struct proto_ops hci_sock_ops = {
+ 	.family		= PF_BLUETOOTH,
+@@ -2074,7 +2052,6 @@
+ static int hci_sock_create(struct net *net, struct socket *sock, int protocol,
+ 			   int kern)
+ {
+-#if 0
+ 	struct sock *sk;
+ 
+ 	BT_DBG("sock %p", sock);
+@@ -2093,7 +2070,6 @@
+ 	sk->sk_destruct = hci_sock_destruct;
+ 
+ 	bt_sock_link(&hci_sk_list, sk);
+-#endif
+ 	return 0;
+ }
+ 

@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/dts-v1/;
+/plugin/;
+
+/* A recovery-local DTBO selected for this tablet, leaving the Linux DTB intact. */
+/ {
+	model = "Samsung Galaxy Tab S7 Wi-Fi";
+	compatible = "samsung,gts7lwifi", "qcom,sm8250";
+	qcom,board-id = <8 7>;
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+		};
+	};
+};

@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Samsung Galaxy Tab S7 Wi-Fi (SM-T870, gts7lwifi)
+ * Copyright (c) 2024, The Linux Foundation
+ */
+
+/dts-v1/;
+
+#include "sm8250-samsung-gts7-common.dtsi"
+
+/ {
+	model = "Samsung Galaxy Tab S7 Wi-Fi";
+	compatible = "samsung,gts7lwifi", "qcom,sm8250";
+
+	/*
+	 * board-id: 待从 bootloader log / downstream 确认真实值
+	 * 暂用 0x0 占位，开机后 ramoops 会暴露若此处错误
+	 */
+	qcom,msm-id = <QCOM_ID_SM8250 0x20001>;	/* SM8250 v2.1 */
+	qcom,board-id = <0x1000b 0>;		/* TODO: 待确认 */
+};

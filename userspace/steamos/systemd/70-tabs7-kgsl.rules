@@ -1,0 +1,3 @@
+# Native Linux desktop access; no world-writable GPU or ION nodes.
+SUBSYSTEM=="kgsl", KERNEL=="kgsl-3d0", GROUP="render", MODE="0660"
+SUBSYSTEM=="misc", KERNEL=="ion", GROUP="render", MODE="0660"

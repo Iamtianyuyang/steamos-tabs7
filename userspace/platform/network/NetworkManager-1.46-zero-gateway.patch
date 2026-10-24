@@ -1,0 +1,12 @@
+--- a/src/libnm-platform/nm-linux-platform.c
++++ b/src/libnm-platform/nm-linux-platform.c
+@@ -5709,7 +5709,8 @@
+ 
+     /* We currently don't have need for multi-hop routes... */
+     if (IS_IPv4) {
+-        NLA_PUT(msg, RTA_GATEWAY, addr_len, &obj->ip4_route.gateway);
++        if (obj->ip4_route.gateway)
++            NLA_PUT(msg, RTA_GATEWAY, addr_len, &obj->ip4_route.gateway);
+     } else {
+         if (!IN6_IS_ADDR_UNSPECIFIED(&obj->ip6_route.gateway))
+             NLA_PUT(msg, RTA_GATEWAY, addr_len, &obj->ip6_route.gateway);

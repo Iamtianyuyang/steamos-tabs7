@@ -1,0 +1,281 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Samsung Galaxy Tab S7 series common device tree
+ * Covers: gts7lwifi (SM-T870), potentially gts7l (SM-T875), gts7xl (SM-T976)
+ *
+ * Reference: sm8250-xiaomi-elish-common.dtsi (same SoC/PMIC/WLAN/panel family)
+ * Downstream: LineageOS android_kernel_samsung_sm8250, arch/arm64/boot/dts/samsung/gts7l/
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include <dt-bindings/sound/qcom,q6afe.h>
+#include <dt-bindings/sound/qcom,q6asm.h>
+#include "sm8250.dtsi"
+#include "pm8150.dtsi"
+#include "pm8150b.dtsi"
+#include "pm8150l.dtsi"
+#include "pm8009.dtsi"
+
+/*
+ * ---------------------------------------------------------------
+ * Wi-Fi 版无 modem，删掉所有 MDM/MPM 相关节点
+ * ---------------------------------------------------------------
+ */
+/delete-node/ &mpss;
+/delete-node/ &slpi;		/* 如 upstream 无此节点可去掉此行 */
+
+/ {
+	chassis-type = "tablet";
+
+	/* ---- ramoops / pstore ---- */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * ramoops: 首要 log 来源（无方便串口时唯一选择）
+		 * 地址放在 downstream 未占用的低端内存区；
+		 * 真实大小/地址待跑机后从 bootloader log 核实
+		 */
+		ramoops@b0000000 {
+			compatible = "ramoops";
+			reg = <0x0 0xb0000000 0x0 0x400000>;
+			record-size = <0x40000>;
+			console-size = <0x40000>;
+			ftrace-size = <0x0>;
+			pmsg-size = <0x200000>;
+			ecc-size = <0x0>;
+		};
+
+		/*
+		 * adsp / cdsp / slpi / venus / xbl / aop 保留区
+		 * 地址直接对应 downstream kona-sec-gts7lwifi-r00.dts
+		 * TODO: 对照 downstream reserved-memory 逐一核实后去掉此注释
+		 */
+		adsp_mem: adsp@8a400000 {
+			reg = <0x0 0x8a400000 0x0 0x2800000>;
+			no-map;
+		};
+
+		cdsp_secure_heap: cdsp-secure-heap@9c000000 {
+			reg = <0x0 0x9c000000 0x0 0x4000000>;
+			no-map;
+		};
+
+		xbl_aop_mem: xbl-aop@80700000 {
+			reg = <0x0 0x80700000 0x0 0x160000>;
+			no-map;
+		};
+	};
+
+	/* ---- simplefb：阶段 A 用 bootloader 传入 framebuffer 验证画面 ---- */
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <1>;
+		ranges;
+
+		framebuffer@9c000000 {
+			compatible = "simple-framebuffer";
+			/*
+			 * 地址/stride 由 bootloader 填入；若 bootloader 不支持
+			 * simplefb 传参，此节点直接删掉，改用 chosen stdout-path
+			 */
+			reg = <0x0 0x9c000000 0xa00000>;
+			width = <2560>;
+			height = <1600>;
+			stride = <10240>;		/* 2560 * 4 bytes (ARGB8888) */
+			format = "a8r8g8b8";
+		};
+	};
+
+	/* ---- aliases ---- */
+	aliases {
+		serial0 = &uart6;
+	};
+
+	/* ---- 电源键 / 音量键（gpio-keys，阶段 C 完善） ---- */
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		key-volume-down {
+			label = "Volume Down";
+			/* pm8150l GPIO3, active low */
+			gpios = <&pm8150l_gpios 3 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+			debounce-interval = <15>;
+		};
+	};
+};
+
+/* ----------------------------------------------------------------
+ * UART6 — debug serial（如能接到就接，接不到内核仍能用）
+ * ---------------------------------------------------------------- */
+&uart6 {
+	status = "okay";
+};
+
+/* ----------------------------------------------------------------
+ * UFS 内置存储（阶段 B）
+ * 直接复用 elish 写法，SoC/PHY 完全一致
+ * ---------------------------------------------------------------- */
+&ufs_mem_hc {
+	status = "okay";
+
+	reset-gpios = <&tlmm 156 GPIO_ACTIVE_LOW>;
+	vcc-supply = <&pm8150_l17>;
+	vcc-max-microamp = <800000>;
+	vccq-supply = <&pm8150_l6>;
+	vccq-max-microamp = <800000>;
+	vccq2-supply = <&pm8150_s4>;
+	vccq2-max-microamp = <800000>;
+};
+
+&ufs_mem_phy {
+	status = "okay";
+
+	vdda-phy-supply = <&pm8150_l5>;
+	vdda-pll-supply = <&pm8150_l9>;
+};
+
+/* ----------------------------------------------------------------
+ * USB（阶段 B：先起 peripheral + USB networking）
+ * ---------------------------------------------------------------- */
+&usb_1 {
+	status = "okay";
+};
+
+&usb_1_dwc3 {
+	dr_mode = "peripheral";
+};
+
+&usb_1_hsphy {
+	status = "okay";
+
+	vdda-pll-supply = <&pm8150_l5>;
+	vdda18-supply = <&pm8150_l12>;
+	vdda33-supply = <&pm8150_l2>;
+};
+
+&usb_1_qmpphy {
+	status = "okay";
+
+	vdda-phy-supply = <&pm8150_l9>;
+	vdda-pll-supply = <&pm8150_l18>;
+};
+
+/* ----------------------------------------------------------------
+ * PON — 电源键 / 音量下键（阶段 B）
+ * ---------------------------------------------------------------- */
+&pon_pwrkey {
+	status = "okay";
+};
+
+&pon_resin {
+	status = "okay";
+	linux,code = <KEY_VOLUMEDOWN>;
+};
+
+/* ----------------------------------------------------------------
+ * PCIe0 + QCA6390 WLAN/BT（阶段 E）
+ * GPIO 编号来自 downstream gts7l DTSi
+ * ---------------------------------------------------------------- */
+&pcie0 {
+	status = "okay";
+};
+
+&pcie0_phy {
+	status = "okay";
+
+	vdda-phy-supply = <&pm8150_l5>;
+	vdda-pll-supply = <&pm8150_l9>;
+};
+
+&pcieport0 {
+	wifi@0,0 {
+		compatible = "pci17cb,1101";
+		reg = <0x10000 0x0 0x0 0x0 0x0>;
+
+		vddrfacmn-supply = <&pm8150_s6>;
+		vddaon-supply = <&pm8150_s6>;
+		vddwlcx-supply = <&pm8150_s6>;
+		vddwlmx-supply = <&pm8150l_s8>;
+		vddrfa0p8-supply = <&pm8150_s6>;
+		vddrfa1p7-supply = <&pm8150b_s8>;
+		vddrfa1p2-supply = <&pm8150_s6>;
+		vddrfa2p2-supply = <&pm8150l_s8>;
+		vddasd-supply = <&pm8150l_l11>;
+
+		wlan-en-gpios = <&tlmm 90 GPIO_ACTIVE_HIGH>;
+		bt-en-gpios = <&tlmm 76 GPIO_ACTIVE_HIGH>;
+
+		/* rome_cable wifi1/wifi2 */
+		pinctrl-names = "default";
+		pinctrl-0 = <&wlan_en_default>;
+	};
+};
+
+/* ----------------------------------------------------------------
+ * microSD（阶段 E）
+ * downstream: sdhc_2，clk 最大 200MHz
+ * ---------------------------------------------------------------- */
+&sdhc_2 {
+	status = "okay";
+
+	vqmmc-supply = <&pm8150l_l13>;
+	vmmc-supply = <&pm8150l_l9>;
+
+	cd-gpios = <&tlmm 77 GPIO_ACTIVE_LOW>;
+
+	/* clk-rates 参考 downstream */
+	bus-width = <4>;
+};
+
+/* ----------------------------------------------------------------
+ * 触摸 Novatek nvt-ts（阶段 C）
+ * i2c 地址 0x62, irq tlmm15
+ * TODO: 确认挂载的 i2c 控制器编号（qup se → mainline i2c alias）
+ * ---------------------------------------------------------------- */
+/*
+&i2c_PLACEHOLDER {
+	novatek-ts@62 {
+		compatible = "novatek,nvt-ts";
+		reg = <0x62>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <15 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpio = <&tlmm TODO GPIO_ACTIVE_LOW>;
+		max-touch-num = <10>;
+	};
+};
+*/
+
+/* ----------------------------------------------------------------
+ * 充电 / 电量（阶段 C）—— 与 elish 不同，不能照抄
+ * gts7lwifi 用 max77705（main charger + 电量计）
+ *             + pca9468（direct charger, i2c 0x57）
+ * max77705 mainline 支持待确认后解注释
+ * ---------------------------------------------------------------- */
+/*
+&i2c_PLACEHOLDER_max77705 {
+	max77705@66 {
+		compatible = "maxim,max77705";
+		reg = <0x66>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <TODO IRQ_TYPE_LEVEL_LOW>;
+	};
+};
+*/
+
+/* ----------------------------------------------------------------
+ * pinctrl
+ * ---------------------------------------------------------------- */
+&tlmm {
+	wlan_en_default: wlan-en-default {
+		pins = "gpio90";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+};

@@ -1,0 +1,7 @@
+# Keep the RNDIS debug interface name the debug shell and NM rule rely on.
+[Match]
+OriginalName=usb0
+
+[Link]
+NamePolicy=
+Name=usb0

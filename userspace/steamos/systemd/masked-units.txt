@@ -1,0 +1,60 @@
+# Units masked (-> /dev/null) in the SteamOS tree for the SM-T870.
+# Steam Frame (deckard) hardware, VR stack and FPGA/DSP/LED/fan control.
+deckard-audio-setup.service
+deckard-boot-images.service
+deckard-charger.service
+deckard-fan-control.service
+deckard-fpga-resume.service
+deckard-fpga.service
+deckard-led-control.service
+deckard-power-monitor.service
+deckard-typec-logger.service
+dsp_service.service
+iris-driver-rebind.service
+softapmanager.service
+steamvr-program-ble.service
+steamvr-set-kernel-thread-priorities.service
+steamvr-v4l2loopback.service
+gpu-trace.service
+steam-video-codec-setup.service
+# A/B boot slots, RAUC updates and U-Boot environment do not exist here.
+rauc.service
+setubootenv.service
+steamos-boot.service
+holo-post-update-shutdown.service
+# The VR session greeter; the SM-T870 Game Mode session is a project unit.
+sddm.service
+# Would replace the RNDIS/ACM debug gadget and filter its telnet port.
+usb-gadget.target
+usb-gadget.service
+adbd.service
+adbd-pre.service
+adbd-post.service
+dev-usb\x2dffs-adb.mount
+firewalld.service
+# Uploads logs to Valve.
+steamos-log-submitter.service
+# Would add a /home partition (repart.d/90-home.conf) to the disk backing
+# /, which here is the tablet's main UFS LUN with every Android partition.
+systemd-repart.service
+# /home is a directory, not a partition: the offload binds would fail and
+# drop systemd into emergency mode. /etc stays a plain writable directory.
+steamos-offload.target
+root.mount
+srv.mount
+var-cache-pacman.mount
+var-lib-containers.mount
+var-lib-docker.mount
+var-lib-flatpak.mount
+var-lib-steamos\x2dlog\x2dsubmitter.mount
+var-lib-systemd-coredump.mount
+var-log.mount
+var-tmp.mount
+etc.mount
+# fstab A/B partition sets (by-partsets) do not exist; even with nofail the
+# /home device job waits out its 90 s timeout and holds local-fs.target.
+home.mount
+efi.mount
+efi.automount
+esp.mount
+esp.automount

@@ -1,0 +1,181 @@
+--- a/src/gallium/drivers/zink/zink_screen.c
++++ b/src/gallium/drivers/zink/zink_screen.c
+@@ -1648,13 +1648,95 @@
+    return -1;
+ }
+ 
++/* Explicit bridge for the SM-T870: KGSL renders, msm_drm owns scanout.
++ * This does not advertise the DPU as the GPU or alter Vulkan DRM properties.
++ */
++static int
++zink_get_sm_t870_kgsl_device(const struct zink_screen *screen,
++                            uint32_t pdev_count, const VkPhysicalDevice *pdevs)
++{
++   PFN_vkGetPhysicalDeviceExternalBufferProperties get_external_props =
++      (PFN_vkGetPhysicalDeviceExternalBufferProperties)
++      screen->vk_GetInstanceProcAddr(screen->instance,
++                                    "vkGetPhysicalDeviceExternalBufferProperties");
++   int selected = -1;
++
++   if (!get_external_props)
++      return -1;
++
++   for (uint32_t i = 0; i < pdev_count; i++) {
++      VkPhysicalDeviceDriverProperties driver = {
++         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES,
++      };
++      VkPhysicalDeviceProperties2 props = {
++         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
++         .pNext = &driver,
++      };
++      VKSCR(GetPhysicalDeviceProperties2)(pdevs[i], &props);
++      if (driver.driverID != VK_DRIVER_ID_MESA_TURNIP ||
++          props.properties.vendorID != 0x5143 ||
++          (props.properties.deviceID & 0xffffff00u) != 0x06050000u)
++         continue;
++
++      uint32_t count = 0;
++      if (VKSCR(EnumerateDeviceExtensionProperties)(pdevs[i], NULL, &count, NULL) != VK_SUCCESS ||
++          !count || count > 65536)
++         continue;
++      VkExtensionProperties *extensions = calloc(count, sizeof(*extensions));
++      if (!extensions)
++         return -1;
++      VkResult result = VKSCR(EnumerateDeviceExtensionProperties)(pdevs[i], NULL,
++                                                                &count, extensions);
++      bool has_drm = false, has_fd = false, has_dmabuf = false;
++      for (uint32_t j = 0; result == VK_SUCCESS && j < count; j++) {
++         has_drm |= !strcmp(extensions[j].extensionName,
++                            VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME);
++         has_fd |= !strcmp(extensions[j].extensionName,
++                           VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
++         has_dmabuf |= !strcmp(extensions[j].extensionName,
++                               VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
++      }
++      free(extensions);
++      /* Turnip explicitly omits EXT_physical_device_drm for its KGSL backend. */
++      if (result != VK_SUCCESS || has_drm || !has_fd || !has_dmabuf)
++         continue;
++
++      VkPhysicalDeviceExternalBufferInfo info = {
++         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO,
++         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
++         .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
++      };
++      VkExternalBufferProperties external = {
++         .sType = VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES,
++      };
++      get_external_props(pdevs[i], &info, &external);
++      const VkExternalMemoryFeatureFlags needed =
++         VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT | VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT;
++      if ((external.externalMemoryProperties.externalMemoryFeatures & needed) != needed ||
++          !(external.externalMemoryProperties.compatibleHandleTypes &
++            VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT))
++         continue;
++      if (selected != -1) {
++         mesa_loge("ZINK: ambiguous SM-T870 KGSL devices, refusing display bridge");
++         return -1;
++      }
++      selected = i;
++   }
++   if (selected == -1)
++      mesa_loge("ZINK: SM-T870 requires Turnip Adreno 650 KGSL with DMA-BUF import/export");
++   else
++      mesa_logi("ZINK: explicit SM-T870 KGSL GPU / msm_drm display bridge enabled");
++   return selected;
++}
++
+ static void
+-choose_pdev(struct zink_screen *screen, int64_t dev_major, int64_t dev_minor, uint64_t adapter_luid)
++choose_pdev(struct zink_screen *screen, int64_t dev_major, int64_t dev_minor, uint64_t adapter_luid,
++            bool kgsl_display_bridge)
+ {
+    bool cpu = debug_get_bool_option("LIBGL_ALWAYS_SOFTWARE", false) ||
+               debug_get_bool_option("D3D_ALWAYS_SOFTWARE", false);
+ 
+-   if (cpu || (dev_major > 0 && dev_major < 255) || adapter_luid) {
++   if (cpu || kgsl_display_bridge || (dev_major > 0 && dev_major < 255) || adapter_luid) {
+       uint32_t pdev_count;
+       int idx;
+       VkPhysicalDevice *pdevs;
+@@ -1682,6 +1764,8 @@
+          idx = zink_match_adapter_luid(screen, pdev_count, pdevs, adapter_luid);
+       else if (cpu)
+          idx = zink_get_cpu_device_type(screen, pdev_count, pdevs);
++      else if (kgsl_display_bridge)
++         idx = zink_get_sm_t870_kgsl_device(screen, pdev_count, pdevs);
+       else
+          idx = zink_get_display_device(screen, pdev_count, pdevs, dev_major,
+                                        dev_minor);
+@@ -3256,7 +3340,7 @@
+ }
+ 
+ static struct zink_screen *
+-zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev_major, int64_t dev_minor, uint64_t adapter_luid)
++zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev_major, int64_t dev_minor, uint64_t adapter_luid, bool kgsl_display_bridge)
+ {
+    if (getenv("ZINK_USE_LAVAPIPE")) {
+       mesa_loge("ZINK_USE_LAVAPIPE is obsolete. Use LIBGL_ALWAYS_SOFTWARE\n");
+@@ -3353,7 +3437,7 @@
+          debug_printf("ZINK: failed to setup debug utils\n");
+    }
+ 
+-   choose_pdev(screen, dev_major, dev_minor, adapter_luid);
++   choose_pdev(screen, dev_major, dev_minor, adapter_luid, kgsl_display_bridge);
+    if (screen->pdev == VK_NULL_HANDLE) {
+       if (!screen->driver_name_is_inferred)
+          mesa_loge("ZINK: failed to choose pdev");
+@@ -3729,7 +3813,7 @@
+ struct pipe_screen *
+ zink_create_screen(struct sw_winsys *winsys, const struct pipe_screen_config *config)
+ {
+-   struct zink_screen *ret = zink_internal_create_screen(config, -1, -1, 0);
++   struct zink_screen *ret = zink_internal_create_screen(config, -1, -1, 0, false);
+    if (ret) {
+       ret->drm_fd = -1;
+    }
+@@ -3775,13 +3859,31 @@
+ struct pipe_screen *
+ zink_drm_create_screen(int fd, const struct pipe_screen_config *config)
+ {
+-   int64_t dev_major, dev_minor;
++   int64_t dev_major = -1, dev_minor = -1;
+    struct zink_screen *ret;
+ 
+-   if (zink_render_rdev(fd, &dev_major, &dev_minor))
++   bool kgsl_display_bridge = debug_get_bool_option("TABS7_ZINK_KGSL", false);
++   if (kgsl_display_bridge) {
++#ifdef HAVE_LIBDRM
++      drmVersionPtr version = drmGetVersion(fd);
++      bool is_sde = version && version->name && version->name_len == 7 &&
++                    !memcmp(version->name, "msm_drm", 7);
++      if (version)
++         drmFreeVersion(version);
++      if (!is_sde || debug_get_bool_option("LIBGL_ALWAYS_SOFTWARE", false) ||
++          debug_get_bool_option("D3D_ALWAYS_SOFTWARE", false)) {
++         mesa_loge("ZINK: SM-T870 KGSL bridge requires msm_drm and hardware rendering");
++         return NULL;
++      }
++#else
++      mesa_loge("ZINK: SM-T870 display bridge requires libdrm support");
+       return NULL;
+-
+-   ret = zink_internal_create_screen(config, dev_major, dev_minor, 0);
++#endif
++   }
++   if (!kgsl_display_bridge && zink_render_rdev(fd, &dev_major, &dev_minor))
++      return NULL;
++   ret = zink_internal_create_screen(config, dev_major, dev_minor, 0,
++                                     kgsl_display_bridge);
+ 
+    if (ret)
+       ret->drm_fd = os_dupfd_cloexec(fd);
+@@ -3797,7 +3899,7 @@
+ struct pipe_screen *
+ zink_win32_create_screen(uint64_t adapter_luid)
+ {
+-   struct zink_screen *ret = zink_internal_create_screen(NULL, -1, -1, adapter_luid);
++   struct zink_screen *ret = zink_internal_create_screen(NULL, -1, -1, adapter_luid, false);
+    return ret ? &ret->base : NULL;
+ }
+ 

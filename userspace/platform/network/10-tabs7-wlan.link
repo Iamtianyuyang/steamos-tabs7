@@ -1,0 +1,7 @@
+[Match]
+OriginalName=wlan0
+Driver=cnss_pci
+
+[Link]
+NamePolicy=
+Name=wlan0

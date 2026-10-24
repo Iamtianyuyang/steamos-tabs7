@@ -1,0 +1,352 @@
+diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
+index 9aaab7b..da789bb 100644
+--- a/src/Backends/DRMBackend.cpp
++++ b/src/Backends/DRMBackend.cpp
+@@ -554,6 +554,44 @@ namespace gamescope
+ }
+ 
+ uint32_t g_nDRMFormat = DRM_FORMAT_INVALID;
++
++// Private, opt-in SM-T870 scanout profile. The 1600x2560 DSI panel needs one
++// framebuffer split across two Qualcomm SDE VIG planes (800 px each) in the
++// same atomic commit. GAMESCOPE_SM_T870_SPLIT names the two plane IDs.
++struct SMT870Split
++{
++	bool bRequested = false;
++	uint32_t uPlaneIds[2] = {};
++	gamescope::CDRMPlane *pPlanes[2] = {};
++};
++static SMT870Split g_SMT870Split;
++
++static bool sm_t870_split_requested()
++{
++	static const bool s_bRequested = []()
++	{
++		const char *pszSplit = getenv( "GAMESCOPE_SM_T870_SPLIT" );
++		if ( !pszSplit || !*pszSplit || strcmp( pszSplit, "0" ) == 0 )
++			return false;
++		unsigned long a = 0, b = 0;
++		char cTrailing = 0;
++		if ( sscanf( pszSplit, "%lu,%lu%c", &a, &b, &cTrailing ) != 2 ||
++			 a == 0 || b == 0 || a == b || a > UINT32_MAX || b > UINT32_MAX )
++		{
++			fprintf( stderr, "gamescope: GAMESCOPE_SM_T870_SPLIT requires two distinct plane IDs\n" );
++			abort();
++		}
++		g_SMT870Split.uPlaneIds[0] = uint32_t( a );
++		g_SMT870Split.uPlaneIds[1] = uint32_t( b );
++		return true;
++	}();
++	g_SMT870Split.bRequested = s_bRequested;
++	return s_bRequested;
++}
++
++static constexpr uint32_t k_uSMT870Width = 1600;
++static constexpr uint32_t k_uSMT870Height = 2560;
++static constexpr uint32_t k_uSMT870HalfWidth = k_uSMT870Width / 2;
+ uint32_t g_nDRMFormatOverlay = DRM_FORMAT_INVALID; // for partial composition, we may have more limited formats than base planes + alpha.
+ bool g_bRotated = false;
+ extern bool g_bDebugLayers;
+@@ -655,8 +693,16 @@ static gamescope::CDRMCRTC *find_crtc_for_connector( struct drm_t *drm, gamescop
+ {
+ 	for ( std::unique_ptr< gamescope::CDRMCRTC > &pCRTC : drm->crtcs )
+ 	{
+-		if ( pConnector->GetPossibleCRTCMask() & pCRTC->GetCRTCMask() )
+-			return pCRTC.get();
++		if ( !( pConnector->GetPossibleCRTCMask() & pCRTC->GetCRTCMask() ) )
++			continue;
++		if ( g_SMT870Split.pPlanes[0] && pConnector->GetModeConnector()->connector_type == DRM_MODE_CONNECTOR_DSI )
++		{
++			const uint32_t uPairMask = g_SMT870Split.pPlanes[0]->GetModePlane()->possible_crtcs &
++				g_SMT870Split.pPlanes[1]->GetModePlane()->possible_crtcs;
++			if ( !( uPairMask & pCRTC->GetCRTCMask() ) )
++				continue;
++		}
++		return pCRTC.get();
+ 	}
+ 
+ 	return nullptr;
+@@ -1543,7 +1589,9 @@ bool init_drm(struct drm_t *drm, int width, int height, int refresh)
+ 	}
+ 
+ 	if (drmGetCap(drm->fd, DRM_CAP_ADDFB2_MODIFIERS, &cap) == 0 && cap != 0) {
+-		drm->allow_modifiers = true;
++		// KGSL Turnip exports no modifier-tiled scanout images; the split
++		// profile scans out linear WSI images, like WLR_DRM_NO_MODIFIERS.
++		drm->allow_modifiers = !sm_t870_split_requested();
+ 	}
+ 
+ 	g_bSupportsAsyncFlips = drmGetCap(drm->fd, DRM_CAP_ATOMIC_ASYNC_PAGE_FLIP, &cap) == 0 && cap != 0;
+@@ -1580,7 +1628,41 @@ bool init_drm(struct drm_t *drm, int width, int height, int refresh)
+ 		drm_log.infof("  %s (%s)", pConnector->GetName(), status_str);
+ 	}
+ 
+-	drm->connector_priorities = parse_connector_priorities( g_sOutputName );
++	if ( sm_t870_split_requested() )
++	{
++		drmVersion *pVersion = drmGetVersion( drm->fd );
++		const bool bSDE = pVersion && pVersion->name && strcmp( pVersion->name, "msm_drm" ) == 0;
++		if ( pVersion )
++			drmFreeVersion( pVersion );
++		if ( !bSDE )
++		{
++			drm_log.errorf( "SM-T870 split requires the msm_drm SDE driver" );
++			return false;
++		}
++		for ( int i = 0; i < 2; i++ )
++		{
++			for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
++			{
++				if ( pPlane->GetObjectId() == g_SMT870Split.uPlaneIds[i] )
++					g_SMT870Split.pPlanes[i] = pPlane.get();
++			}
++			gamescope::CDRMPlane *pPlane = g_SMT870Split.pPlanes[i];
++			if ( !pPlane || !pPlane->GetProperties().zpos || !pPlane->GetProperties().FB_ID ||
++				 !pPlane->GetProperties().CRTC_ID ||
++				 pPlane->GetProperties().type->GetCurrentValue() == DRM_PLANE_TYPE_CURSOR )
++			{
++				drm_log.errorf( "SM-T870 plane %u is not a usable VIG with zpos", g_SMT870Split.uPlaneIds[i] );
++				g_SMT870Split.pPlanes[0] = g_SMT870Split.pPlanes[1] = nullptr;
++				return false;
++			}
++		}
++		drm_log.infof( "SM-T870 split: VIG planes %u/%u", g_SMT870Split.uPlaneIds[0], g_SMT870Split.uPlaneIds[1] );
++	}
++
++	// The SDE also reports its writeback Virtual-1 as connected; the split
++	// profile exists for the panel, so prefer DSI-1 unless told otherwise.
++	drm->connector_priorities = parse_connector_priorities(
++		g_sOutputName ? g_sOutputName : ( g_SMT870Split.pPlanes[0] ? "DSI-1" : nullptr ) );
+ 
+ 	if (!setup_best_connector(drm, true, true)) {
+ 		return false;
+@@ -1607,7 +1689,21 @@ bool init_drm(struct drm_t *drm, int width, int height, int refresh)
+ 		return false;
+ 	}
+ 
+-	if ( !get_plane_formats( drm, drm->pPrimaryPlane, &drm->primary_formats ) )
++	if ( g_SMT870Split.pPlanes[0] )
++	{
++		struct wlr_drm_format_set left = {}, right = {};
++		bool bOk = get_plane_formats( drm, g_SMT870Split.pPlanes[0], &left ) &&
++			get_plane_formats( drm, g_SMT870Split.pPlanes[1], &right ) &&
++			wlr_drm_format_set_intersect( &drm->primary_formats, &left, &right );
++		wlr_drm_format_set_finish( &left );
++		wlr_drm_format_set_finish( &right );
++		if ( !bOk )
++		{
++			drm_log.errorf( "SM-T870 VIG pair has no common formats" );
++			return false;
++		}
++	}
++	else if ( !get_plane_formats( drm, drm->pPrimaryPlane, &drm->primary_formats ) )
+ 	{
+ 		return false;
+ 	}
+@@ -3195,6 +3291,68 @@ static void drm_unlink_foreign_planes( struct drm_t *drm )
+ 	drmModeAtomicFree( req );
+ }
+ 
++static int drm_prepare_sm_t870_split( struct drm_t *drm, const struct FrameInfo_t *frameInfo )
++{
++	if ( frameInfo->layers.count() != 1 )
++		return -EINVAL;
++
++	const FrameInfo_t::Layer_t *pLayer = &frameInfo->layers.get( 0 );
++	if ( !pLayer->tex )
++		return -EINVAL;
++	if ( pLayer->tex->width() != k_uSMT870Width || pLayer->tex->height() != k_uSMT870Height )
++	{
++		drm_log.errorf( "SM-T870 split requires a %ux%u composite, got %ux%u",
++			k_uSMT870Width, k_uSMT870Height, pLayer->tex->width(), pLayer->tex->height() );
++		return -EINVAL;
++	}
++
++	gamescope::CDRMFb *pDrmFb = static_cast<gamescope::CDRMFb *>(
++		pLayer->tex->GetBackendFb() ? pLayer->tex->GetBackendFb()->EnsureImported() : nullptr );
++	if ( pDrmFb == nullptr )
++		return -EINVAL;
++
++	const uint32_t uCRTCId = drm->pCRTC->GetObjectId();
++	for ( int i = 0; i < 2; i++ )
++	{
++		gamescope::CDRMPlane *pPlane = g_SMT870Split.pPlanes[i];
++		if ( !( pPlane->GetModePlane()->possible_crtcs & drm->pCRTC->GetCRTCMask() ) )
++			return -EINVAL;
++
++		auto &props = pPlane->GetProperties();
++		const uint64_t ulOffset = uint64_t( k_uSMT870HalfWidth ) * i;
++		props.FB_ID->SetPendingValue( drm->req, pDrmFb->GetFbId(), true );
++		props.CRTC_ID->SetPendingValue( drm->req, uCRTCId, true );
++		props.SRC_X->SetPendingValue( drm->req, ulOffset << 16, true );
++		props.SRC_Y->SetPendingValue( drm->req, 0, true );
++		props.SRC_W->SetPendingValue( drm->req, uint64_t( k_uSMT870HalfWidth ) << 16, true );
++		props.SRC_H->SetPendingValue( drm->req, uint64_t( k_uSMT870Height ) << 16, true );
++		props.CRTC_X->SetPendingValue( drm->req, ulOffset, true );
++		props.CRTC_Y->SetPendingValue( drm->req, 0, true );
++		props.CRTC_W->SetPendingValue( drm->req, k_uSMT870HalfWidth, true );
++		props.CRTC_H->SetPendingValue( drm->req, k_uSMT870Height, true );
++		// Both halves share zpos 0; this is the contract verified on this panel.
++		props.zpos->SetPendingValue( drm->req, 0, true );
++		if ( props.rotation )
++			props.rotation->SetPendingValue( drm->req, DRM_MODE_ROTATE_0, true );
++		if ( props.IN_FENCE_FD )
++			props.IN_FENCE_FD->SetPendingValue( drm->req, -1, true );
++	}
++
++	// Detach every other plane still scanning out on our CRTC (e.g. the primary).
++	for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
++	{
++		if ( pPlane.get() == g_SMT870Split.pPlanes[0] || pPlane.get() == g_SMT870Split.pPlanes[1] )
++			continue;
++		if ( pPlane->GetProperties().CRTC_ID->GetCurrentValue() != uCRTCId )
++			continue;
++		pPlane->GetProperties().FB_ID->SetPendingValue( drm->req, 0, true );
++		pPlane->GetProperties().CRTC_ID->SetPendingValue( drm->req, 0, true );
++	}
++
++	drm->m_FbIdsInRequest.emplace_back( pDrmFb );
++	return 0;
++}
++
+ /* Prepares an atomic commit for the provided scene-graph. Returns 0 on success,
+  * negative errno on failure or if the scene-graph can't be presented directly. */
+ int drm_prepare( struct drm_t *drm, bool async, const struct FrameInfo_t *frameInfo )
+@@ -3412,7 +3570,18 @@ int drm_prepare( struct drm_t *drm, bool async, const struct FrameInfo_t *frameI
+ 
+ 	int ret;
+ 	if ( drm->pCRTC == nullptr || bSleep ) {
++		// Without liftoff nothing else detaches the pair from a sleeping CRTC.
++		for ( gamescope::CDRMPlane *pPlane : g_SMT870Split.pPlanes )
++		{
++			if ( pPlane && pPlane->GetProperties().CRTC_ID->GetCurrentValue() != 0 )
++			{
++				pPlane->GetProperties().FB_ID->SetPendingValue( drm->req, 0, true );
++				pPlane->GetProperties().CRTC_ID->SetPendingValue( drm->req, 0, true );
++			}
++		}
+ 		ret = 0;
++	} else if ( g_SMT870Split.pPlanes[0] ) {
++		ret = drm_prepare_sm_t870_split( drm, frameInfo );
+ 	} else if ( drm->bUseLiftoff ) {
+ 		ret = drm_prepare_liftoff( drm, frameInfo, needs_modeset );
+ 	} else {
+@@ -3683,7 +3852,7 @@ bool drm_set_mode( struct drm_t *drm, const drmModeModeInfo *mode )
+ 	if ( uStep )
+ 	{
+ 		const bool bScanoutCanRotate = drm->pPrimaryPlane && ( drm_plane_supported_rotations( drm, drm->pPrimaryPlane ) & ulNeeded );
+-		if ( g_bForceCompositionRotation || !bScanoutCanRotate )
++		if ( g_bForceCompositionRotation || !bScanoutCanRotate || g_SMT870Split.pPlanes[0] )
+ 			g_uOutputRotation = uStep;
+ 	}
+ 
+@@ -3889,7 +4058,7 @@ namespace gamescope
+         }
+ 		virtual bool ValidPhysicalDevice( VkPhysicalDevice pVkPhysicalDevice ) const override
+ 		{
+-			return vulkan_has_drm_props();
++			return vulkan_has_drm_props() || sm_t870_split_requested();
+ 		}
+ 
+ 		virtual int Present( const FrameInfo_t *pFrameInfo, bool bAsync )
+@@ -3952,6 +4121,7 @@ namespace gamescope
+ 
+ 			bNeedsFullComposite |= !!(g_uCompositeDebug & CompositeDebugFlag::Heatmap);
+ 			bNeedsFullComposite |= g_uOutputRotation != 0; // can't rotate planes at scanout
++			bNeedsFullComposite |= g_SMT870Split.pPlanes[0] != nullptr; // split scanout takes one FB
+ 
+ 			bool bDoComposite = true;
+ 			if ( !bNeedsFullComposite && !bWantsPartialComposite )
+diff --git a/src/pipewire.cpp b/src/pipewire.cpp
+index 76b3ea8..f965c44 100644
+--- a/src/pipewire.cpp
++++ b/src/pipewire.cpp
+@@ -4,6 +4,7 @@
+ #include <poll.h>
+ #include <stdio.h>
+ #include <sys/mman.h>
++#include <time.h>
+ #include <unistd.h>
+ 
+ #include <atomic>
+@@ -728,9 +729,17 @@ bool init_pipewire(void)
+ 
+ 	state->running = true;
+ 	ret = 0;
++	// Bound the wait: this runs before the child is launched, so a session
++	// manager that never exports the node would block gamescope forever.
++	struct timespec now;
++	clock_gettime(CLOCK_MONOTONIC, &now);
++	const time_t deadline = now.tv_sec + 5;
+ 	pw_loop_enter(state->loop);
+ 	while (state->stream_node_id == SPA_ID_INVALID) {
+-		ret = pw_loop_iterate(state->loop, -1);
++		clock_gettime(CLOCK_MONOTONIC, &now);
++		if (now.tv_sec >= deadline)
++			break;
++		ret = pw_loop_iterate(state->loop, 100);
+ 		if (ret < 0)
+ 			break;
+ 	}
+@@ -741,6 +750,20 @@ bool init_pipewire(void)
+ 		return false;
+ 	}
+ 
++	if (state->stream_node_id == SPA_ID_INVALID) {
++		pwr_log.errorf("no capture node from PipeWire within 5 s; screen capture disabled");
++		state->running = false;
++		pw_stream_destroy(state->stream);
++		state->stream = nullptr;
++		pw_core_disconnect(state->core);
++		state->core = nullptr;
++		pw_context_destroy(state->context);
++		state->context = nullptr;
++		pw_loop_destroy(state->loop);
++		state->loop = nullptr;
++		return false;
++	}
++
+ 	pwr_log.infof("stream available on node ID: %u", state->stream_node_id);
+ 
+ 	std::thread thread(run_pipewire, state);
+diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
+index 54e4efc..df27f57 100644
+--- a/src/rendervulkan.cpp
++++ b/src/rendervulkan.cpp
+@@ -463,7 +463,35 @@ bool CVulkanDevice::createDevice()
+ 
+ 	vk_log.infof( "physical device %s DRM format modifiers", m_bSupportsModifiers ? "supports" : "does not support" );
+ 
+-	if ( !hasDrmProps ) {
++	if ( !hasDrmProps && getenv( "GAMESCOPE_SM_T870_SPLIT" ) ) {
++		// SM-T870: KGSL Turnip has no DRM node of its own. Buffers are shared
++		// with the Qualcomm SDE display device, so publish its primary and
++		// render nodes (wl_drm, dmabuf feedback, KMS) instead.
++		vk_log.warnf( "physical device doesn't support VK_EXT_physical_device_drm; using the SDE display nodes" );
++		int nCardFd = open( "/dev/dri/card0", O_RDWR | O_CLOEXEC );
++		drmVersion *pVersion = nCardFd >= 0 ? drmGetVersion( nCardFd ) : nullptr;
++		const bool bSDE = pVersion && pVersion->name && strcmp( pVersion->name, "msm_drm" ) == 0;
++		if ( pVersion )
++			drmFreeVersion( pVersion );
++		char *pszRender = bSDE ? drmGetRenderDeviceNameFromFd( nCardFd ) : nullptr;
++		struct stat cardStat = {};
++		const bool bCardStat = nCardFd >= 0 && fstat( nCardFd, &cardStat ) == 0;
++		if ( nCardFd >= 0 )
++			close( nCardFd );
++		if ( !bSDE || !pszRender || !bCardStat ) {
++			free( pszRender );
++			vk_log.errorf( "SM-T870 split requires the msm_drm card0 with a render node" );
++			return false;
++		}
++		m_drmRendererFd = open( pszRender, O_RDWR | O_CLOEXEC );
++		free( pszRender );
++		if ( m_drmRendererFd < 0 ) {
++			vk_log.errorf_errno( "failed to open the SDE render node" );
++			return false;
++		}
++		m_bHasDrmPrimaryDevId = true;
++		m_drmPrimaryDevId = cardStat.st_rdev;
++	} else if ( !hasDrmProps ) {
+ 		// This could happen when e.g. running the lavapipe driver
+ 		// (without an actual physical device)
+ 		vk_log.warnf( "physical device doesn't support VK_EXT_physical_device_drm" );
