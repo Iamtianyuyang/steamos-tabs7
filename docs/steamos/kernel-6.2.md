@@ -158,3 +158,26 @@ overlay/正确的 DTBO 表项，要么让 LK 跳过 overlay（风险高）。之
 
 辅助脚本：`scripts/device/flash-via-recovery.py`（TWRP 内一条命令完成 push → dd →
 读回校验 → `twrp reboot` → 有界采样 USB，给出"内核是否执行"的判读）。
+
+### 实验 B 与 E1（2026-10-24）
+
+| 实验 | 内核 | DTB | DTBO | 结果 |
+| --- | --- | --- | --- | --- |
+| — | vendor 4.19 | vendor 4.19 | Lineage | ✅ 启动（基准） |
+| A | vendor 4.19 | **6.2** | Lineage | ⛔ +26 s 落 Download |
+| B | **6.2** | vendor 4.19 | Lineage | ⛔ 60 s 内无任何 USB（既无 gadget 也无 Download） |
+| E1 | vendor 4.19 | vendor 4.19 | **空操作表** | ⛔ +26 s 落 Download |
+
+**修正解读**：把三次失败放在一起看，"LK 因为 overlay 失败而拒绝"的解释站不住：
+
+- A 与 E1 的失败都发生在 ~26 s，B 则完全没有 USB 事件，说明这几条路径的失败点不同；
+- E1 用的是已知可启动的 vendor 内核 + vendor DTB，唯一差别是 DTBO 内容。厂商内核的
+  显示/面板节点来自 overlay，空表让它找不到面板而崩溃，这足以解释 26 s 后的兜底；
+- 因此 **不能据此断言 LK 拒绝主线 DTB**。更可能的模型是：LK 把镜像交给内核执行，
+  内核崩溃后 bootloader 兜底回 Download（A/E1 是厂商内核 + 不适配的 DTB 崩溃，
+  B 是 6.2 内核早期挂死且没有触发兜底）。
+
+**结论**：三条实验都指向同一件事——6.2 内核在这块板子上没有活过早期初始化；而要判断
+"LK 是否真的跳进内核"以及"内核死在哪一步"，需要早期串口输出（UART）或更早的持久化
+记录。当前手段（ramoops/pstore）都太晚：pstore 为空说明内核没走到 initcall。
+主线 6.2 的推进因此**被调试通道卡住**，而不是被某个配置项卡住。
