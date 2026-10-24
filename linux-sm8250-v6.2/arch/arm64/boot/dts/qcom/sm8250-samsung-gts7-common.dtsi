@@ -618,6 +618,29 @@
 };
 
 /*
+ * Panel supplies, taken from the downstream display DTS
+ * (kona-sec-gts7l-display-r00.dtsi):
+ *   vddlcd (1.8 V) = fixed regulator on tlmm135
+ *   buck           = fixed regulator on tlmm93, 10 ms boost/discharge time
+ * Reset stays on tlmm82.
+ */
+/ {
+	panel_vddio: regulator-panel-vddio {
+		compatible = "regulator-fixed";
+		regulator-name = "panel-vddio";
+		gpio = <&tlmm 135 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	panel_buck: regulator-panel-buck {
+		compatible = "regulator-fixed";
+		regulator-name = "panel-buck";
+		gpio = <&tlmm 93 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+};
+
+/*
  * NT36523 panel node
  * Driver: drivers/gpu/drm/panel/panel-novatek-nt36523.c
  *
@@ -625,8 +648,7 @@
  *   panel port@0 → dsi0_out  (primary, 发初始化命令)
  *   panel port@1 → dsi1_out  (secondary, 驱动通过 of_graph 自动找到)
  *
- * TODO: 补 vddio regulator 引用（待确认 pm8150l 哪路 LDO 供 panel IO）
- * TODO: 确认 DSI 时序参数后更新 panel-novatek-nt36523.c 中的 drm_display_mode
+ * 初始化序列与时序由 scripts/steamos/emit-panel-seq.py 生成，不在此处维护。
  */
 &dsi0 {
 	panel@0 {
@@ -635,10 +657,10 @@
 		reg = <0>;
 
 		reset-gpios = <&tlmm 82 GPIO_ACTIVE_LOW>;
-		ldo-en-gpios = <&tlmm 135 GPIO_ACTIVE_HIGH>;
-		buck-en-gpios = <&tlmm 93 GPIO_ACTIVE_HIGH>;
 
-		/* vddio-supply = <TODO>; */
+		/* vendor: qcom,panel-supply-entry@0 "vddlcd" and @1 "buck" */
+		vddio-supply = <&panel_vddio>;
+		buck-supply = <&panel_buck>;
 
 		ports {
 			#address-cells = <1>;

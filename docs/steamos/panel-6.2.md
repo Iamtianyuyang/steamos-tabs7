@@ -51,8 +51,8 @@
 | 4 | ~~**时序**~~（已生成） | 模式改为完整的 1600×2560@120：msm 对 bonded DSI 会把水平时序减半，所以 DRM 模式里用整幅宽度和**翻倍的**水平 porch，每链路回到厂商的 800 宽 + 84/2/30 | 时钟 570265 kHz；行为待真机 |
 | 5 | ~~**lane 数与 PHY 模式**~~（已改） | DTS 现在两条 DSI 都是 `data-lanes = <0 1 2>`，两个 PHY 都带 `phy-type = <11>`（C-PHY，`PHY_TYPE_CPHY` 来自 `dt-bindings/phy/phy.h`） | 与厂商的 3 trio C-PHY 一致 |
 | 6 | ~~**每链路宽度**~~（已改） | 模式按整幅 1600 宽声明，`dsi_host.c` 的 bonded 逻辑把 hdisplay/htotal 减半，于是每链路正好 800 | 与厂商语义一致 |
-| 7 | **物理尺寸** | 主线 220×138 mm；厂商 148×236 mm | 仅影响 DPI/触摸标定 |
-| 8 | **vddio 供电** | TODO | 面板 IO 无电源 |
+| 7 | ~~**物理尺寸**~~（已改） | 生成头文件里是 148×236 mm | 与厂商一致 |
+| 8 | ~~**vddio 供电**~~（已补） | 从下游 `kona-sec-gts7l-display-r00.dtsi` 查到：`vddlcd`(1.8 V)=tlmm135 固定稳压器、`buck`=tlmm93 固定稳压器（10 ms 升压/放电）、复位 tlmm82；驱动改用 `vddio`/`buck` 两路 regulator | 电源时序按厂商 supply-entry 顺序 |
 | 9 | **双 VIG 平面布局** | 6.2 有 `sm8250_vig_sblk_*`，但没验证过两个 VIG 分别驱动一个 DSI 接口 | 见面板点亮后第一件事 |
 
 ## 工作顺序
@@ -121,9 +121,29 @@ scripts/steamos/emit-panel-seq.py --check   # 头文件是否与 JSON 同步
 
 编译结果（显示层配置）：`Image cffd32e7…`、`Image.gz 71f1e36f…`、DTB `e91c2afd…`。
 
+## 供电与亮度（2026-10-24）
+
+下游 display DTS 里的供电定义（`kona-sec-gts7l-display-r00.dtsi`，UTF-16 源文件）：
+
+| 厂商 | 引脚 | 属性 | 主线实现 |
+| --- | --- | --- | --- |
+| `vddlcd` 1.8 V（`fixed_reg_lcd_1p8`） | tlmm135 | GPIO 固定稳压器 | `panel_vddio` regulator-fixed |
+| `buck`（`fixed_reg_buck_en`，post-on 10 ms / post-off 10 ms） | tlmm93 | GPIO 固定稳压器 | `panel_buck` regulator-fixed |
+| 面板复位 | tlmm82 | `qcom,platform-reset-gpio` | `reset-gpios` |
+| ESD / UB con det | tlmm66 / tlmm46 | 中断检测 | 未接（见下） |
+
+驱动改成 `vddio` + `buck` 两路 regulator，顺序按厂商 supply-entry：
+`vddio → buck → 10 ms 升压 → 复位四相 → 初始化序列`，下电反向并保留 10 ms 放电。
+
+亮度用生成头文件里的 `PPA957DB1_BRIGHTNESS_MAX/MIN`（462/4）注册 backlight 设备，
+`update_status` 走标准 `mipi_dsi_dcs_set_display_brightness()`（DCS `0x51`，两字节）。
+绑定文档 `samsung,gts7l-nt36523.yaml` 记录了 `reset-gpios`、两路 supply 与双 DSI 端口。
+
+编译结果：`Image 5656e8e2…`、`Image.gz ad8d24c3…`、DTB `92c514cd…`。
+
 ## 仍未完成
 
-- `vddio-supply` 仍是 TODO（面板 IO 供电的 LDO 未确认），面板节点仍 `disabled`；
+- 面板节点仍是 `disabled`：点亮前要先在真机确认 C-PHY 锁定与初始化序列；
 - 双 VIG 在 `msm`/DPU 上的平面绑定未验证，`65,86` 组合需要在 6.2 上重新求；
-- 亮度 DCS `0x51`（4–462）还没接 backlight 设备；
+- ESD 中断（tlmm66 上升沿）与 UB con det（tlmm46）还没接，厂商靠它做面板状态检查；
 - 全部参数只是与厂商源码一致，**没有一项在真机点亮过**。

@@ -74,6 +74,40 @@ class GeneratedHeaderTest(unittest.TestCase):
         self.assertIn('MIPI_DSI_MODE_VIDEO_BURST', self.driver)
         self.assertIn('MIPI_DSI_FMT_RGB888', self.driver)
 
+    def test_panel_node_uses_regulator_supplies(self):
+        dts = (KERNEL / 'arch/arm64/boot/dts/qcom/sm8250-samsung-gts7-common.dtsi').read_text()
+        panel = dts[dts.index('panel@0 {'):]
+        panel = panel[:panel.index('\n\t};')]
+        self.assertIn('vddio-supply = <&panel_vddio>;', panel)
+        self.assertIn('buck-supply = <&panel_buck>;', panel)
+        self.assertNotIn('ldo-en-gpios', panel)
+        self.assertNotIn('buck-en-gpios', panel)
+        for regulator in ('regulator-panel-vddio', 'regulator-panel-buck'):
+            self.assertIn(regulator, dts)
+        self.assertRegex(dts, r'panel_vddio[^}]*gpio = <&tlmm 135 GPIO_ACTIVE_HIGH>;', )
+        self.assertRegex(dts, r'panel_buck[^}]*gpio = <&tlmm 93 GPIO_ACTIVE_HIGH>;')
+
+    def test_brightness_uses_the_profile_range(self):
+        self.assertIn('mipi_dsi_dcs_set_display_brightness', self.driver)
+        self.assertIn('.max_brightness\t= PPA957DB1_BRIGHTNESS_MAX', self.driver)
+        self.assertIn('devm_backlight_device_register', self.driver)
+        self.assertIn('#define PPA957DB1_BRIGHTNESS_MAX\t462', self.header)
+
+    def test_supplies_follow_the_vendor_order(self):
+        body = self.driver[self.driver.index('static int nt36523_power_on'):]
+        body = body[:body.index('\n}\n')]
+        vddio = body.index('regulator_enable(ctx->vddio)')
+        buck = body.index('regulator_enable(ctx->buck)')
+        reset = body.index('gpiod_set_value_cansleep(ctx->reset_gpio, 0)')
+        self.assertLess(vddio, buck, 'vddlcd must come before the buck')
+        self.assertLess(buck, reset, 'the buck needs its 10 ms boost before reset')
+
+    def test_panel_binding_documents_the_supplies(self):
+        binding = (KERNEL / 'Documentation/devicetree/bindings/display/panel/'
+                   'samsung,gts7l-nt36523.yaml').read_text()
+        for key in ('vddio-supply', 'buck-supply', 'reset-gpios'):
+            self.assertIn(key, binding)
+
     def test_sleep_out_and_display_on_are_not_sent_twice(self):
         self.assertNotIn('mipi_dsi_dcs_exit_sleep_mode', self.driver)
         self.assertNotIn('mipi_dsi_dcs_set_display_on', self.driver)

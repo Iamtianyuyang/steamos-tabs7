@@ -14,6 +14,7 @@
  * Reference driver: panel-truly-nt35597.c (dual-DSI probe pattern)
  */
 
+#include <linux/backlight.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
@@ -51,9 +52,9 @@ struct nt36523 {
 	const struct nt36523_desc *desc;
 
 	struct regulator *vddio;
+	struct regulator *buck;
 	struct gpio_desc *reset_gpio;
-	struct gpio_desc *ldo_en_gpio;
-	struct gpio_desc *buck_en_gpio;
+	struct backlight_device *backlight;
 
 	bool prepared;
 };
@@ -98,15 +99,22 @@ static int nt36523_power_on(struct nt36523 *ctx)
 {
 	int ret;
 
+	/*
+	 * Vendor supply order: vddlcd (1.8 V, fixed regulator on TLMM135) first,
+	 * then the buck (TLMM93) with a 10 ms boost time before the reset
+	 * sequence. qcom,panel-supply-entry@1 carries post-on-sleep = 10.
+	 */
 	ret = regulator_enable(ctx->vddio);
 	if (ret < 0)
 		return ret;
 
-	/* buck enable, then LDO, then reset sequence */
-	gpiod_set_value_cansleep(ctx->buck_en_gpio, 1);
-	usleep_range(2000, 3000);
-	gpiod_set_value_cansleep(ctx->ldo_en_gpio, 1);
-	usleep_range(2000, 3000);
+	ret = regulator_enable(ctx->buck);
+	if (ret < 0) {
+		regulator_disable(ctx->vddio);
+		return ret;
+	}
+
+	msleep(10);
 
 	/*
 	 * Vendor reset sequence: <0 12>, <1 12>, <0 12>, <1 12> in ms, taken from
@@ -127,10 +135,10 @@ static int nt36523_power_on(struct nt36523 *ctx)
 static int nt36523_power_off(struct nt36523 *ctx)
 {
 	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-	usleep_range(2000, 3000);
-	gpiod_set_value_cansleep(ctx->ldo_en_gpio, 0);
-	usleep_range(2000, 3000);
-	gpiod_set_value_cansleep(ctx->buck_en_gpio, 0);
+
+	/* 10 ms discharge time from qcom,panel-supply-entry@1 */
+	regulator_disable(ctx->buck);
+	msleep(10);
 
 	return regulator_disable(ctx->vddio);
 }
@@ -214,6 +222,34 @@ static const struct drm_panel_funcs nt36523_funcs = {
 	.get_modes	= nt36523_get_modes,
 };
 
+/*
+ * Brightness uses the vendor DCS path: long write 0x51 with two data bytes,
+ * levels 4..462 (qcom,mdss-dsi-bl-min-level / -max-level). The panel profile in
+ * hardware/samsung/gts7lwifi/panel/ carries the same numbers.
+ */
+static int nt36523_bl_update_status(struct backlight_device *bl)
+{
+	struct nt36523 *ctx = bl_get_data(bl);
+
+	return mipi_dsi_dcs_set_display_brightness(ctx->dsi[0], bl->props.brightness);
+}
+
+static const struct backlight_ops nt36523_bl_ops = {
+	.update_status	= nt36523_bl_update_status,
+};
+
+static struct backlight_device *nt36523_register_backlight(struct nt36523 *ctx)
+{
+	struct backlight_properties props = {
+		.type		= BACKLIGHT_RAW,
+		.max_brightness	= PPA957DB1_BRIGHTNESS_MAX,
+		.brightness	= PPA957DB1_BRIGHTNESS_MAX,
+	};
+
+	return devm_backlight_device_register(ctx->panel.dev, "nt36523", ctx->panel.dev,
+					      ctx, &nt36523_bl_ops, &props);
+}
+
 static int nt36523_probe(struct mipi_dsi_device *dsi)
 {
 	struct device *dev = &dsi->dev;
@@ -259,9 +295,22 @@ static int nt36523_probe(struct mipi_dsi_device *dsi)
 	ctx->dsi[1] = dsi1;
 	mipi_dsi_set_drvdata(dsi, ctx);
 
+	/*
+	 * vddio is the panel's 1.8 V rail (vendor "vddlcd", a fixed regulator on
+	 * TLMM135); buck is the second fixed regulator on TLMM93. Both are simple
+	 * GPIO switches modelled as regulator-fixed in the board DTS.
+	 */
 	ctx->vddio = devm_regulator_get(dev, "vddio");
 	if (IS_ERR(ctx->vddio)) {
-		ret = PTR_ERR(ctx->vddio);
+		ret = dev_err_probe(dev, PTR_ERR(ctx->vddio),
+				    "failed to get vddio supply\n");
+		goto err_unreg;
+	}
+
+	ctx->buck = devm_regulator_get(dev, "buck");
+	if (IS_ERR(ctx->buck)) {
+		ret = dev_err_probe(dev, PTR_ERR(ctx->buck),
+				    "failed to get buck supply\n");
 		goto err_unreg;
 	}
 
@@ -272,17 +321,10 @@ static int nt36523_probe(struct mipi_dsi_device *dsi)
 		goto err_unreg;
 	}
 
-	ctx->ldo_en_gpio = devm_gpiod_get(dev, "ldo-en", GPIOD_OUT_LOW);
-	if (IS_ERR(ctx->ldo_en_gpio)) {
-		ret = dev_err_probe(dev, PTR_ERR(ctx->ldo_en_gpio),
-				    "failed to get ldo-en gpio\n");
-		goto err_unreg;
-	}
-
-	ctx->buck_en_gpio = devm_gpiod_get(dev, "buck-en", GPIOD_OUT_LOW);
-	if (IS_ERR(ctx->buck_en_gpio)) {
-		ret = dev_err_probe(dev, PTR_ERR(ctx->buck_en_gpio),
-				    "failed to get buck-en gpio\n");
+	ctx->backlight = nt36523_register_backlight(ctx);
+	if (IS_ERR(ctx->backlight)) {
+		ret = dev_err_probe(dev, PTR_ERR(ctx->backlight),
+				    "failed to register backlight\n");
 		goto err_unreg;
 	}
 
