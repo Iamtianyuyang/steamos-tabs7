@@ -117,7 +117,7 @@ def decode_version(event, payload, query):
                 "hci_version": payload[4], "hci_revision": struct.unpack_from("<H", payload, 5)[0],
                 "lmp_version": payload[7], "manufacturer": struct.unpack_from("<H", payload, 8)[0],
                 "lmp_subversion": struct.unpack_from("<H", payload, 10)[0]}
-    # Original btqca.c specifies the VSE structure; official Linux 6.2 skips
+    # Original btqca.c specifies the VSE structure; mainline Linux (6.18 too) skips
     # one byte before newer QCA version data. The real QCA6390 packet puts
     # the 12-byte version length there, rather than an error status. Match the
     # complete structure, preserving bytes without guessing the chip type.

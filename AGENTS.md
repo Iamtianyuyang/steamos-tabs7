@@ -4,17 +4,21 @@
 - Project version: **0.0.001**, kept in `VERSION`. Do not change the version
   number, retag releases or invent new version names unless the user asks for it
   explicitly; a hardware result alone is not a reason to bump it.
-- **Project goal: the full SteamOS ARM port on the mainline 6.2 kernel.**
+- **Project goal: the full SteamOS ARM port on the mainline 6.18 LTS kernel.**
   SteamOS (Game Mode and Desktop Mode) with the two-VIG display path. Everything
   else in the tree exists only to serve that goal; the Ubuntu GNOME/Phosh/XFCE
-  desktop track was removed in the SteamOS-only cleanup.
-- Kernel: `linux-sm8250-v6.2/` is the target kernel tree and the canonical DTS
+  desktop track was removed in the SteamOS-only cleanup, and the earlier
+  mainline 6.2 tree was removed when the port moved to 6.18 (why, and what was
+  carried over: [docs/steamos/kernel-6.18.md](docs/steamos/kernel-6.18.md)).
+- Kernel: `linux-sm8250-v6.18/` (kernel.org 6.18.58 plus the project changes
+  listed in that document) is the target kernel tree and the canonical DTS
   location (`arch/arm64/boot/dts/qcom/`), built with
-  `scripts/build/mainline/`. Mainline 6.2 has **never booted on this hardware**;
-  every hardware result recorded so far was obtained with the vendor
-  Lineage/Samsung 4.19 kernel, whose path (`scripts/build/vendor/`,
-  `scripts/build/bluetooth/`) stays available until 6.2 reaches the same state.
-  Never describe a 6.2 result as a hardware result without a real boot log.
+  `scripts/build/mainline/`. Mainline 6.18.58 has booted to the RAM initramfs
+  on this hardware, with USB ECM/ACM and telnet working; the persistent SteamOS
+  boot remains unverified. The vendor Lineage/Samsung 4.19 path
+  (`scripts/build/vendor/`, `scripts/build/bluetooth/`) stays available until
+  6.18 reaches the same state. Never describe a 6.18 result as a hardware
+  result without a real boot log.
 - Historical drafts are in `hardware/samsung/gts7lwifi/devicetree/drafts/`;
   downstream references and overlays are in its sibling `vendor/` and `overlays/`.
 - Follow [the project layout](docs/development/project-layout.md): host build and
@@ -25,8 +29,9 @@
   evidence under `out/` are independent of the repository source layout.
 - SteamOS work status, rootfs provenance and acceptance boundaries live in
   [the SteamOS document](docs/steamos/README.md). Native boot evidence lives in
-  [docs/boot/native-boot-tests.md](docs/boot/native-boot-tests.md). Mainline 6.2
-  remains unverified on hardware.
+  [docs/boot/native-boot-tests.md](docs/boot/native-boot-tests.md). Mainline 6.18
+  initramfs/USB evidence is in `docs/steamos/kernel-6.18.md`; the full SteamOS
+  boot remains unverified on hardware.
 - Use project skills `device-tree`, `cross-gcc`, `device-drivers`, and
   `kernel-debugging` when applicable.
 - **Never let a single command block longer than two minutes.** Long waits are not
@@ -39,7 +44,7 @@
   index is kept by default). DTS, Kconfig, logs, and other literal configuration
   searches can use native tools.
 - The workspace path contains spaces, so Kbuild cannot run in place.
-  `scripts/build/mainline/build-bringup.sh` synchronizes the 6.2 tree into
+  `scripts/build/mainline/build-bringup.sh` synchronizes the 6.18 tree into
   `~/.cache/tabs7linux/<project-path-hash>/` and builds there; `TAB_S7_BUILD_ROOT`
   overrides the location. Vendor 4.19 builds (`scripts/build/vendor/`) work from
   the prepared source under `out/vendor-kernel-prep/src`, which the SteamOS

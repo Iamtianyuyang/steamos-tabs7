@@ -57,7 +57,7 @@ def main():
                          '--key', str(key), '--rollback_index', str(rollback_index),
                          '--rollback_index_location', str(location),
                          '--salt', hashlib.sha256(b'tabs7linux recovery development AVB').hexdigest(),
-                         '--prop', 'com.android.build.recovery.fingerprint:samsung/tabs7linux_gts7lwifi/gts7lwifi:linux/6.2/development:userdebug/test-keys',
+                         '--prop', 'com.android.build.recovery.fingerprint:samsung/tabs7linux_gts7lwifi/gts7lwifi:linux/6.18/development:userdebug/test-keys',
                          '--prop', 'com.tabs7linux.recovery.kind:mainline-linux-bringup'], check=True)
     subprocess.run(avb + ['verify_image', '--image', str(output), '--key', str(key)], check=True)
     signed = output.read_bytes()

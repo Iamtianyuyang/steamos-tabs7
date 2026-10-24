@@ -1,0 +1,231 @@
+# 内核迁移：厂商 4.19 → 主线 6.18 LTS
+
+SteamOS 的目标内核是主线 **6.18 LTS**（`linux-sm8250-v6.18/`，基线 6.18.58）。
+**6.18 至今没有在真机启动过**：现在设备上跑的每一项目标都仍由 Lineage/Samsung 4.19
+内核提供。这份文档记录为什么选 6.18、构建方式、从早先主线树移植过来的内容、配置映射，
+以及按依赖顺序排出的阻塞项。
+
+## 为什么是 6.18
+
+上游事实于 2026-10-24 联网核对。
+
+| 需求 | 最低内核 | 4.19 | 6.18 | 来源 |
+| --- | --- | --- | --- | --- |
+| systemd 258+（去掉 cgroup v1） | 5.4（推荐 5.7，下个版本预计 5.10） | ⛔ | ✅ | systemd v258 发布说明 |
+| Proton fsync（`futex_waitv`） | 5.16 | ⛔ 只能用 esync | ✅ | Phoronix，5.16 合并窗口 |
+| ntsync（Wine 10.15+） | 6.14 | ⛔ | ✅ | Phoronix，6.14 char/misc |
+| `msm` VM_BIND（Vulkan sparse） | 6.17 | ⛔ | ✅ | 6.17 周期的 DRM pull；CVE-2026-53054 受影响范围从 6.17 起 |
+| Turnip sparse binding/residency | 需要上面的 VM_BIND | ⛔ | ✅ | Mesa !32533，2025-08-25 合入 |
+| 上游 Mesa / SteamOS 自带 Mesa | 主线 `msm` | ⛔ KGSL | ✅ | 见下文“能带过去的与带不过去的” |
+
+- 6.12 和 6.18 两个 LTS 的维护期都已延长到 2028-12。6.18 是唯一同时满足上表所有项的 LTS。
+- 6.18 收录了 Galaxy S20（`x1q`）和 S20 FE（`r8q`），两者共用 `sm8250-samsung-common.dtsi`。
+  这说明主线内核在三星 SM8250 的启动链上能启动。这个 dtsi 只含 simple-framebuffer、按键、
+  ramoops、PM8150 稳压器、USB、UFS，是对照 `sm8250-samsung-gts7-common.dtsi` 的参考。
+  主线没有 Tab S7 自己的设备树，也没有它的面板、触摸或 GPU 节点。
+
+### 时间约束：systemd 258
+
+当前 SteamOS rootfs 是 **systemd 257.7**（`out/steamos/systemd-facts.txt`），还能在
+4.19 上运行。一旦 rootfs 升级到 258，**4.19 路径就无法启动**。因此在 6.18 通过真机
+验收之前，更新 rootfs 前要先确认 systemd 主版本 < 258。
+
+## 构建
+
+```sh
+scripts/build/mainline/build-steamos-6.18.sh config   # 只验证配置
+scripts/build/mainline/build-steamos-6.18.sh dtb      # DTB
+scripts/build/mainline/build-steamos-6.18.sh image    # DTB + Image/Image.gz（默认）
+scripts/build/mainline/build-steamos-6.18.sh image \
+    hardware/samsung/gts7lwifi/kernel/configs/steamos-display-6.18.config  # 追加显示层
+```
+
+脚本把 `hardware/samsung/gts7lwifi/kernel/configs/gts7lwifi-bringup.config` 与
+`steamos-6.18.config` 合并（后者覆盖前者），用 `allnoconfig` 生成配置，
+**逐条核对每个请求的符号是否真的保留**，然后把 DTB、`Image`、`Image.gz`、
+`kernel.config`、`config-review.txt` 和 `manifest.json` 写到
+`out/steamos-kernel-6.18/`。缓存目录是
+`~/.cache/tabs7linux/steamos-6.18-<项目路径哈希>/`（`TAB_S7_STEAMOS_BUILD_ROOT` 可覆盖）。
+
+当前结果（6.18.58，clang 18.1.3 / LLD 18，加显示层，零警告）：
+
+| 产物 | SHA-256 |
+| --- | --- |
+| `Image` | `d8883a29c8ddd831fea40a82694c45c586a9d83153033e2642d944adc9625631` |
+| `Image.gz` | `62e90443afa5a39a763c5f49fd51fc06808ee6d4838c912d27e1e1b904a99f5c` |
+| `sm8250-samsung-gts7lwifi.dtb` | `92e5d160b8ae25864ab66a93e86f84a6653ff95008d4f621d201f174138bb0e9` |
+
+130 项请求全部保留。产物只是编译结果，不是可启动镜像。本机没有 `dtschema`，
+DTS 还没跑过 `dtbs_check`。
+
+## 源码树
+
+`linux-sm8250-v6.18/` 是 kernel.org 的 `linux-6.18.58.tar.xz`（SHA-256
+`069b19f9…cbdecb1`，校验列表经 kernel.org autosigner `B886…A6B1` 签名验证），加上
+下面这些项目改动。与原版 6.18.58 做 diff 就能列出全部改动：
+
+| 改动 | 文件 |
+| --- | --- |
+| 板级 DTS | `arch/arm64/boot/dts/qcom/sm8250-samsung-gts7lwifi.dts`、`sm8250-samsung-gts7-common.dtsi`，dtb `Makefile` 条目，`bindings/arm/qcom.yaml` 加 `samsung,gts7lwifi` |
+| C-PHY 每面板寄存器覆写 | `drivers/gpu/drm/msm/dsi/phy/dsi_phy.{c,h}`、`dsi_phy_7nm.c`，`bindings/display/msm/dsi-phy-7nm.yaml` |
+| 面板驱动 | `drivers/gpu/drm/panel/panel-novatek-nt36523-gts7lwifi.{c,h}`，Kconfig `DRM_PANEL_NOVATEK_NT36523_GTS7LWIFI`，`bindings/display/panel/samsung,gts7l-nt36523.yaml` |
+
+从早先主线树移植时做的适配：
+
+- **DSI 标签改名**：6.18 的 `sm8250.dtsi` 把 `dsi0`/`dsi0_phy`/`dsi0_out`（dsi1 同理）改成了
+  `mdss_dsi0`/`mdss_dsi0_phy`/`mdss_dsi0_out`，板级 DTS 和测试已跟着改。
+- **面板驱动改名**：6.18 自带一个 `panel-novatek-nt36523.c`（Xiaomi elish、Lenovo J606F），
+  与项目驱动同名。项目驱动改为 `panel-novatek-nt36523-gts7lwifi.c`，驱动名和 Kconfig 都独立，
+  上游的 `DRM_PANEL_NOVATEK_NT36523` 保持关闭。
+- **面板驱动 API**：改用 `devm_drm_panel_alloc()`，并设置 `prepare_prev_first`（`prepare()`
+  里要发初始化序列，DSI host 必须先上电）。旧写法在 `drm_panel_init()` 之前就用
+  `ctx->panel.dev` 注册背光和 ESD 中断，那时它还是 NULL，改为一开始分配后这个问题消失。
+  Kconfig 补上了 `depends on BACKLIGHT_CLASS_DEVICE`。
+- **PHY 寄存器写法**：6.18 去掉了 `dsi_phy_write()`，覆写函数改用 `writel()`。
+- **binding**：6.18 已经自带 `qcom,master-dsi`、`qcom,sync-dual-dsi` 的说明，不再重复添加。
+- 早先主线树里随带的 `sm8250-lenovo-j716f.dts` 和 `configs/sm8250.config` 不属于本项目，没有带过来。
+
+## 配置映射
+
+| 4.19 厂商片段 | 6.18 片段 | 说明 |
+| --- | --- | --- |
+| `steamos-ipc.config`：`SYSVIPC`、`IPC_NS` 关闭 | `SYSVIPC`、`SYSVIPC_SYSCTL`、`SYSVIPC_COMPAT`，`IPC_NS` 仍关闭 | Steam 客户端调用 `semget()`；`IPC_NS` 沿用 4.19 的决定，尚未在 Steam Runtime 里验证过开启 |
+| `steamos-systemd.config`：`DEVTMPFS`、`FHANDLE`、`CGROUP_PIDS`、`USER_NS`、`PID_NS`、`AUTOFS_FS` | 同名符号，追加 `CGROUPS`、`NAMESPACES`、`NET_NS`、`UTS_NS`、`TMPFS_XATTR`、`TMPFS_POSIX_ACL` | `allnoconfig` 会关掉 `CGROUPS`/`NAMESPACES`，而 `CGROUP_PIDS`/`USER_NS` 依赖它们，不显式打开就会被 Kconfig 静默丢弃 |
+| `DEVTMPFS_MOUNT` 关闭 | 同样关闭 | initramfs 自己在新根上挂 devtmpfs，内核先挂会打架 |
+| 厂商内核内建 F2FS | `F2FS_FS=y` | 交接步骤要先挂 userdata 才能找到 SteamOS 树，主线默认没有 |
+
+## 能带过去的与带不过去的
+
+| 组件 | 4.19 做法 | 6.18 上的状态 |
+| --- | --- | --- |
+| systemd / cgroup v2 / logind | 4.19 + 补的 `DEVTMPFS`、`FHANDLE`、`CGROUP_PIDS`、`USER_NS`/`PID_NS` | 主线原生支持，配置已就位 |
+| HCI socket | 厂商内核禁用了它，需要 `hci-socket-restore.patch` 重建内核 | 主线本来就启用，补丁不需要 |
+| 热插拔节点 | 厂商没有 `DEVTMPFS`，靠手工 `mknod` + 写 `uevent` | 主线有 `DEVTMPFS`，`systemd-udevd` 正常建节点 |
+| VT / seatd 变通 | 厂商内核无 VT，用 `SEATD_VTBOUND=0` | 主线有 VT/DRM，变通可保留但不再是必需 |
+| GPU（Turnip KGSL → Zink → wlroots/gamescope） | 私有 Mesa 走厂商 `KGSL`，双 VIG 由私有补丁拆分 | **主线没有 KGSL**，换成上游 `msm` + freedreno/Turnip。私有前缀 `turnip-kgsl/`、`mesa-zink*`、`gamescope-sm-t870` 的构建前提都变了 |
+| 面板与双 VIG | 厂商 DSI/DPU 行为 + `WLR_DRM_SM_T870_SPLIT=65,86` | 面板驱动是项目自带的；主线应在 DPU 内部完成左右拆分，见[面板与双 VIG](panel-6.18.md) |
+| 触摸 | 厂商 `sec_touchscreen`/nt36523 | 6.18 没有 nt36523 触摸驱动；`novatek-nvt-ts`（nt11205/nt36672a）是候选起点，协议是否相同待查 |
+| Wi-Fi / 蓝牙 | 厂商 `qcacld` + CNSS + 私有 NetworkManager | 主线路线是 `ath11k` + `hci_qca`，与现有 `userspace/platform/network/`、`platform/bluetooth/` 的适配对象不同 |
+
+## 真机启动记录（2026-10-24）
+
+**状态：6.18.58 已在真机上启动到 initramfs `/init`，屏幕输出内核日志；USB ECM/ACM 与 telnet 已通，尚未进入持久 SteamOS。**
+证据是平板屏幕照片（fbcon 输出）、主机侧 `lsusb`/内核日志，以及 telnet 内的 `uname` 和 MUIC 读回值。
+
+### 启动链：三星 ABL 只接受厂商 DTB，内核可以随便换
+
+| 实验（DTBO、vbmeta 均为 Lineage 原版） | 结果 |
+| --- | --- |
+| 184 字节探针（`boot/probe/entry-probe.S`，涂红 splash 并喂狗）+ 厂商 DTB | ✅ 屏幕变红，不落 Download |
+| 同一探针 + 主线 DTB | ⛔ 约 26 s 落入 `Custom Binary(boot) Blocked By OEM Lock` |
+
+- 拦截的是 BOOT 里的**主线 DTB**，内核内容不受校验。以前实验 A/E1 和 6.18 的所有失败都是这一个原因，
+  不是看门狗，也不是内核崩溃。
+- 所以 BOOT 里放的是 **shim**（`boot/shim/`，`scripts/build/mainline/build-boot-shim.sh`）：ABL 看到的
+  是厂商 DTB（`out/steamos/boot-preflight-*/boot/original/dtb`，3 份拼接）+ Lineage DTBO，shim 把 ABL
+  填好的 `/chosen/bootargs`、`linux,initrd-*`、`kaslr-seed`、`/memory/reg` 搬进内嵌的主线 DTB，把内嵌
+  Image 放到 2 MiB 对齐处后跳入。shim 出错时用整屏颜色报告（黄/品红/青），成功前画绿条。
+  打包：`build-steamos-6.18-boot.py --experiment --kernel out/boot-shim/Image --dtb <厂商 DTB>`。
+- 这样 DTBO 和 vbmeta 永远保持 Lineage 原版，4.19 与 6.18 之间切换只换 BOOT。
+- splash：`0x9c000000`，1600×2560，XRGB8888，探针涂红已验证；`simple-framebuffer` 按此启用。
+
+### 今天确认的其他事实
+
+- **DTBO 必须和 vbmeta 的 dtbo 哈希一致**：重建的 DTBO（无 footer、或用测试密钥签 footer）都被拦，
+  Odin 也报 `FAIL! Auth`。`build-noop-dtbo.py`、`build-vbmeta.py` 能生成配对的 DTBO+vbmeta，
+  但走 shim 后不再需要。vbmeta 分区（`sdd25`）在 UFS 层写保护，TWRP 里 `dd` 报只读，只能用 Odin。
+- **Odin 的 Auth 结果在"启动被拦后自动进入的 Download 会话"里不可信**：同一会话里连 4.19 基线
+  BOOT 也报 Auth；从 TWRP `adb reboot download` 主动进入的会话正常。Auth 失败后会话即失效。
+- 基础 DTB 的 `qcom,board-id` 是 `0 0`（厂商同样如此），`8 7` 是 ABL 叠加 DTBO 第 6 项之后的值。
+- 设备 DTBO 曾经停在实验 E1 的空表（`dd04ec36…`），已恢复为 Lineage `9383ef37…`。
+
+### 6.18 早期初始化：依次查清的三个问题
+
+1. **SoC 基础驱动缺失**（屏幕上 `devices_deferred`）：`apps_rsc` 依赖 PSCI 空闲电源域，缺它则
+   rpmhcc、bcm-voter、RPMh 稳压器都不出现，interconnect、USB PHY、dwc3 全部停在 defer；TLMM、SPMI
+   依赖 PDC；AOSS 依赖 IPCC。bring-up 配置已补 `CPU_IDLE`、`ARM_PSCI_CPUIDLE(_DOMAIN)`、`QCOM_PDC`、
+   `QCOM_IPCC`；命令行用 `cpuidle.off=1` 保留电源域但不进深度空闲。
+2. **TLMM probe 挂死**（`dyndbg="file drivers/base/dd.c +p"` 显示最后一行是 sm8250-pinctrl）：
+   6.18 的 gpiolib 在注册时读取每个引脚的方向（`gpiolib.c:1172`），4.19 不读。GPIO 20–23 是 TrustZone
+   的指纹 SPI，三星内核用 `msm_gpio_is_valid()` 跳过它们（真机 `/proc/config.gz`：
+   `SENSORS_FP_SPI_GPIO_START/END=20/23`，无 eSE、MST）。改为 `gpio-reserved-ranges = <20 4>, <40 4>`，
+   与上游 Galaxy S20 一致。
+3. **dwc3 `failed to enable ep0out`**：只接了 USB2 PHY，没有 PIPE 时钟。`&usb_1` 加
+   `qcom,select-utmi-as-pipe-clk;` 后消失（与上游 S20 一致）。
+
+另：面板两路固定稳压器加 `regulator-boot-on`（没有它，TLMM 正常后 `fixed.c` 会以 OUT_LOW 关掉面板）；
+SPMI SID 2/0xa/0xb（pm8150b、pm8009）访问失败 `-5`，暂不影响。
+
+### USB 线路已接通（MAX77705）
+
+- 修复前屏幕诊断：UDC `state=not attached`，`DCTL=0x80f00000`（RUN_STOP=1），`DSTS` 链路状态 3（挂起），
+  `GCTL/GSTS` 为设备模式；dwc3 glue 已打开 VBUS 覆写，PHY 也置位了 `VBUSVLDEXT0`；主机侧没有任何
+  连接事件。控制器和 PHY 都在工作，D+ 上拉到不了接口。
+- Tab S7 的 D+/D− 经过 **MAX77705 的 MUIC 开关**（FSA4480 在厂商 DTB 中 disabled）。厂商
+  `max77705_muic_shutdown()` 关机时调用 `com_to_open()`；用 `sysrq-b`（不走关机回调）重启进 6.18
+  后仍未接通，说明 ABL 正常启动时也不会把它接到 USB。6.18 需要自己把开关切到 USB。
+- 协议（厂商源码）：I2C `i2c@980000`（QUP0 SE0，GPIO 28/29，主线 `&i2c0`），从地址 `0x25`；
+  写 `0x21 = [0x06, 0x09]`（`COMMAND_CONTROL1_WRITE`，`COM_USB`）后写 `0x41 = 0x00`；
+  读用 opcode `0x05`，结果在 `0x51`；`BC_STATUS`（`0x08`）bit7 为 VBUS。`COM_OPEN = 0x3F`。
+- bring-up 配置已补 `I2C`、`I2C_CHARDEV`、`I2C_QCOM_GENI`、`DMADEVICES`、`QCOM_GPI_DMA`，
+  DTS 启用 `&i2c0`。initramfs 在绑定 gadget UDC 前执行上述 COM_USB 写入，不改充电寄存器。
+- 初次失败的直接原因是 initramfs 的 sysfs 匹配，不是 I2C probe：实际适配器路径为
+  `/sys/devices/platform/soc@0/9c0000.geniqup/980000.i2c/i2c-0`，旧模式 `*980000.i2c`
+  因末尾还有 `/i2c-0` 而匹配不到。改为 `*980000.i2c*` 后找到 `/dev/i2c-0`；单适配器回退仅作诊断保护。
+- 真机证据（候选 `out/boot-shim/muic-usb-adapter-20261024-01/boot.img`，SHA-256 `f4edfbbb…65ce`）：
+  主机 `lsusb` 出现 `1d6b:0104`，UDC 为 `configured`；telnet `192.168.77.2` 可执行命令，
+  `uname` 为 `6.18.58 aarch64`，`usb0=192.168.77.2/24`。MUIC 读回 `BC_STATUS=0x81`（VBUS=1），
+  `0x51..0x52 = 0x06 0x09`，确认开关保持在 COM_USB。
+
+写入通道：TWRP 内用 `scripts/device/flash-via-recovery.py`；运行中的 4.19 SteamOS 内用
+`scripts/device/push-boot.py`（支持 `--partition dtbo`）。
+
+## 按顺序的阻塞项
+
+1. ~~**早期调试通道与 USB 线路**~~（已完成）：simpledrm + fbcon 显示 6.18 日志；
+   MAX77705 已切到 USB，主机枚举 `1d6b:0104`，telnet shell 可用，见上文。
+2. **initramfs 找到 userdata**（当前；代码已实现，待 6.18 真机验证）。`start-persistent-gui`
+   先读 `/sys/class/block/*/partlabel`（主线的 GPT 名称，需 `CONFIG_EFI_PARTITION=y`），
+   没有该属性时回退到厂商内核的 `uevent PARTNAME`，命中后仍按 F2FS 双超级块 magic 与 UUID
+   校验。4.19 上只验证过回退分支；**partlabel 分支要等 6.18 首次启动才会第一次真正执行**。
+3. **显示**：面板参数、九项差距和工作顺序见[面板与双 VIG](panel-6.18.md)。
+4. **GPU 用户空间**：重建上游 freedreno/Turnip(`msm`) + gamescope 的构建与库布局，
+   `userspace/steamos/gamescope-session` 里的 `TABS7_ZINK_KGSL=1`、`mesa-zink-gnome-x11`
+   前缀都要改写；gamescope 打开 modifier，用 `VK_EXT_physical_device_drm` 匹配 KMS 设备。
+5. **输入与网络**：触摸、Wi-Fi、蓝牙都需要对应的主线驱动与固件路径。
+6. **BOOT 封装**：6.18 `Image` 沿用现有 v2 header/AVB 封装与命令行（`rdinit=`、
+   `androidboot.*`），写入前用 `preflight-steamos-boot.py` 的同类检查确认。
+
+验收标准：gamescope 直驱双 VIG，Steam 能进 Game Mode；Proton 日志里有 fsync，
+vkd3d-proton 能识别 sparse。每一项都必须有真机证据。
+
+在 1–3 项在真机上通过之前，不要把 6.18 产物写成“可启动内核”，也不要覆盖 4.19 的 BOOT。
+4.19 路径（`scripts/build/vendor/`）保留到 6.18 达到同样水平为止。
+
+## 6.18 BOOT 候选
+
+`scripts/build/mainline/build-steamos-6.18-boot.py` 把 6.18 内核打进 BOOT：沿用设备上
+正在用的 BOOT 的 header v2 参数与命令行，只替换三个载荷（`Image`、DTB、initramfs），
+用同样的 rollback index/location 重新签 AVB。
+
+```sh
+scripts/build/mainline/build-steamos-6.18-boot.py \
+    --snapshot out/steamos/native-preflash3 \
+    --deployed-boot out/steamos/boot-preflight-20261024-145309/boot/boot.img \
+    --kernel out/steamos-kernel-6.18/Image \
+    --dtb out/steamos-kernel-6.18/sm8250-samsung-gts7lwifi.dtb \
+    --ramdisk out/steamos/boot-preflight-20261024-145309/boot/initramfs.cpio.gz \
+    --output out/steamos-kernel-6.18/boot
+```
+
+写入前它会依次核对：同一次启动的四分区快照（manifest 哈希、PIT 容量、DTBO/RECOVERY
+布局、实时 DTB、board-id/msm-id）、已部署 BOOT 的 AVB 签名与 header v2、内核确实是
+6.18、DTB 里确实有面板节点，最后核对重打包后只有三个载荷变化、header 与命令行逐项
+一致、镜像正好等于 BOOT 分区容量。
+
+当前产物：`out/steamos-kernel-6.18/boot/boot.img`（`f0708f9d…67a5`，71,303,168 字节），
+内核 6.18.58，`text_offset=0x80000`、`res3=0xecefecef` 从已部署内核复制，DTB 含面板节点，
+AVB footer 已验证。initramfs 与 4.19 上正在运行的那个相同。
+
+脚本只生成镜像，写盘要单独授权。回退镜像是
+`out/steamos/boot-preflight-20261024-145309/boot/boot.img`（`37f5aa13…`）。

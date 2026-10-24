@@ -85,7 +85,7 @@ is_steamos_tree() {
 # Enumerate GPT-labelled partitions. Never fall back to a guessed device number.
 # Mainline exposes the GPT name as the partlabel attribute; the vendor 4.19 kernel
 # only reports it as PARTNAME in uevent, so accept either and count each device
-# once. CONFIG_EFI_PARTITION supplies partlabel on 6.2.
+# once. CONFIG_EFI_PARTITION supplies partlabel on mainline.
 userdata_device=
 partition_count=0
 for block_directory in /sys/class/block/*; do

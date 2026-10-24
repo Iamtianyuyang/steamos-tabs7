@@ -6,10 +6,10 @@ import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-KERNEL = ROOT / 'linux-sm8250-v6.2'
+KERNEL = ROOT / 'linux-sm8250-v6.18'
 PROFILE = ROOT / 'hardware/samsung/gts7lwifi/panel/nt36523-ppa957db1.json'
 HEADER = KERNEL / 'drivers/gpu/drm/panel/panel-novatek-nt36523-gts7lwifi.h'
-DRIVER = KERNEL / 'drivers/gpu/drm/panel/panel-novatek-nt36523.c'
+DRIVER = KERNEL / 'drivers/gpu/drm/panel/panel-novatek-nt36523-gts7lwifi.c'
 
 
 def load(name, relative):
@@ -110,9 +110,9 @@ class GeneratedHeaderTest(unittest.TestCase):
 
     def test_bonded_dual_dsi_is_declared(self):
         dts = (KERNEL / 'arch/arm64/boot/dts/qcom/sm8250-samsung-gts7-common.dtsi').read_text()
-        dsi0 = dts[dts.index('&dsi0 {'):]
+        dsi0 = dts[dts.index('&mdss_dsi0 {'):]
         dsi0 = dsi0[:dsi0.index('\n};')]
-        dsi1 = dts[dts.index('&dsi1 {'):]
+        dsi1 = dts[dts.index('&mdss_dsi1 {'):]
         dsi1 = dsi1[:dsi1.index('\n};')]
         self.assertIn('qcom,dual-dsi-mode;', dsi0)
         self.assertIn('qcom,master-dsi;', dsi0)
@@ -139,7 +139,7 @@ class GeneratedHeaderTest(unittest.TestCase):
 
     def test_display_pipeline_is_enabled_in_the_board_dts(self):
         dts = (KERNEL / 'arch/arm64/boot/dts/qcom/sm8250-samsung-gts7-common.dtsi').read_text()
-        for node in ('mdss', 'mdss_mdp', 'dsi0', 'dsi0_phy', 'dsi1', 'dsi1_phy'):
+        for node in ('mdss', 'mdss_mdp', 'mdss_dsi0', 'mdss_dsi0_phy', 'mdss_dsi1', 'mdss_dsi1_phy'):
             body = dts[dts.index(f'&{node} {{'):]
             body = body[:body.index('\n};')]
             self.assertIn('status = "okay";', body, node)
@@ -157,8 +157,8 @@ class GeneratedHeaderTest(unittest.TestCase):
             self.assertIn('bias-disable;', body, state)
 
     def test_six_two_boot_builder_guards(self):
-        builder = (ROOT / 'scripts/build/mainline/build-steamos-6.2-boot.py').read_text()
-        self.assertIn("if '6.2' not in version.split()[2]", builder)
+        builder = (ROOT / 'scripts/build/mainline/build-steamos-6.18-boot.py').read_text()
+        self.assertIn("if not version.split()[2].startswith('6.18.'):", builder)
         self.assertIn("b'samsung,gts7l-nt36523' not in dtb.read_bytes()", builder)
         self.assertIn("'--partition_size', str(capacity)", builder)
         self.assertIn('hardware_boot_observed', builder)

@@ -13,12 +13,12 @@ class HandoverTest(unittest.TestCase):
         self.init = INIT.read_text()
 
     def test_userdata_label_uses_partlabel_before_uevent(self):
-        # 6.2 exposes the GPT name as partlabel; 4.19 only as uevent PARTNAME.
+        # Mainline exposes the GPT name as partlabel; 4.19 only as uevent PARTNAME.
         partlabel = self.text.index('partlabel')
         fallback = self.text.index('PARTNAME')
         self.assertLess(partlabel, fallback, 'partlabel must be tried first')
         self.assertIn('CONFIG_EFI_PARTITION', (ROOT / 'hardware/samsung/gts7lwifi/kernel/configs/'
-                                               'steamos-6.2.config').read_text())
+                                               'steamos-6.18.config').read_text())
 
     def test_userdata_is_still_verified_by_content(self):
         # The label only finds the device; the F2FS magic and UUID decide.

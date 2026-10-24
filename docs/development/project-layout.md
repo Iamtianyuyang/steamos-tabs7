@@ -1,14 +1,14 @@
 # 项目目录导航
 
-仓库只为**在 SM-T870 上完整移植 SteamOS** 服务。GNOME/Phosh/XFCE 桌面线和主线
-6.2 启动线已移除，`linux-sm8250-v6.2/` 仅作为 DTS 来源与参考保留。
+仓库只为**在 SM-T870 上完整移植 SteamOS** 服务。GNOME/Phosh/XFCE 桌面线和早先的
+主线 6.2 树已移除，目标内核是 `linux-sm8250-v6.18/`。
 以下命令从 `steamos-tabs7/` 执行。
 
 | 位置 | 内容与入口 |
 | --- | --- |
 | `docs/steamos/` | SteamOS 移植总览、进度与验收边界；`gpu-stack.md`、`wlroots-split.md`、`wlroots-render-sync.md` 是显示与 GPU 路径说明 |
-| `docs/boot/` | 原生启动与 Recovery 记录；`mainline-bringup.md` 是 6.2 构建入口说明 |
-| `docs/hardware/` | Wi-Fi/CNSS 适配记录；`mainline-port-checklist.md` 是 6.2 移植清单 |
+| `docs/boot/` | 原生启动与 Recovery 记录；`mainline-bringup.md` 记录主线镜像的 ABL 启动门槛 |
+| `docs/hardware/` | Wi-Fi/CNSS 适配记录；`mainline-port-checklist.md` 是主线 DTS 移植清单 |
 | `hardware/samsung/gts7lwifi/devicetree/` | `drafts/` 保存历史草稿，`vendor/` 保存下游参考，`overlays/` 保存启动 overlay |
 | `hardware/samsung/gts7lwifi/kernel/` | 厂商 4.19 补丁与配置；`configs/steamos-ipc.config`、`configs/steamos-systemd.config` 是 SteamOS 内核变体 |
 | `hardware/samsung/gts7lwifi/profiles/` | 设备身份、固件布局、保留区和蓝牙 ABI 的核对资料 |
@@ -22,21 +22,21 @@
 | `scripts/build/vendor/` | 厂商内核镜像、SteamOS initramfs、BOOT 更新与写盘前预检（`preflight-steamos-boot.py`） |
 | `scripts/build/bluetooth/` | HCI 内核变体构建与核验 |
 | `scripts/steamos/` | rootfs 抓取/盘点、Steam 客户端与 systemd 适配安装、IPC 内核核验、面板参数提取（`extract-panel-profile.py`）与初始化序列生成（`emit-panel-seq.py`） |
-| `scripts/build/mainline/` | 主线 6.2 内核/DTB/initramfs 构建、SteamOS 与显示配置层（`build-steamos-6.2.sh`）、6.2 BOOT 候选（`build-steamos-6.2-boot.py`）与产物核验 |
+| `scripts/build/mainline/` | 主线 6.18 内核/DTB/initramfs 构建、SteamOS 与显示配置层（`build-steamos-6.18.sh`）、6.18 BOOT 候选（`build-steamos-6.18-boot.py`）与产物核验 |
 | `scripts/device/` | 只读设备采集、原厂固件分析、双系统镜像整备（`prepare-dual-boot.py`）与有界设备轮询（`wait-for-device.py`） |
 | `scripts/recovery/` | Recovery 封装、AVB 工具调用与写入前核验 |
 | `scripts/setup/` | 主机工具准备与下载校验 |
 | `tools/device/` | 独立设备分析工具；`read-super-lp.py` 只分析已复制的普通文件；`switch-boot.sh` 在 recovery 内切换 Android/Linux |
 | `tests/steamos/` | rootfs 盘点、客户端安装、systemd 适配、内核配置与蓝牙变体回归 |
 | `tests/hardware/bluetooth/` | 蓝牙 rfkill 与休眠时钟交接测试 |
-| `linux-sm8250-v6.2/` | 目标内核（主线 6.2）：DTS 入口 `arch/arm64/boot/dts/qcom/sm8250-samsung-gts7lwifi.dts`，构建脚本在 `scripts/build/mainline/` |
+| `linux-sm8250-v6.18/` | 目标内核（主线 6.18.58 LTS）：DTS 入口 `arch/arm64/boot/dts/qcom/sm8250-samsung-gts7lwifi.dts`，构建脚本在 `scripts/build/mainline/` |
 | `../downstream-sm8250/` | 独立的下游参考 Git 仓库，位于移植目录之外的仓库根，保持独立 Git 身份 |
 | `out/` | 忽略的下载、构建产物、设备备份和实机证据 |
 
 常用入口：
 
 ```sh
-# 目标内核（主线 6.2）
+# 目标内核（主线 6.18）
 scripts/setup/prepare-tools.sh
 scripts/build/mainline/build-initramfs.sh
 scripts/build/mainline/build-bringup.sh image

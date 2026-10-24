@@ -11,6 +11,67 @@ mount -t debugfs debugfs /sys/kernel/debug
 mount -t pstore pstore /sys/fs/pstore
 echo 'Tab S7 Linux bring-up initramfs reached /init' > /dev/kmsg
 
+find_muic_bus() {
+    bus=
+    adapter_count=0
+    only_bus=
+    for dev in /sys/class/i2c-dev/i2c-*; do
+        [ -e "$dev" ] || continue
+        adapter_count=$((adapter_count + 1))
+        only_bus=${dev##*/i2c-}
+        path=$(readlink -f "$dev/device")
+        echo "I2C adapter $dev -> $path"
+        case "$path" in
+            *980000.i2c*)
+                bus=$only_bus
+                return
+                ;;
+        esac
+    done
+    if [ "$adapter_count" -eq 1 ]; then
+        bus=$only_bus
+    fi
+}
+
+show_muic() {
+    echo '=== MAX77705: 980000.i2c, address 0x25'
+    find_muic_bus
+    if [ -z "$bus" ]; then
+        echo 'I2C adapter for 980000.i2c not found; deferred probes:'
+        cat /sys/kernel/debug/devices_deferred 2>&1
+        echo 'I2C/GENI/GPI kernel messages:'
+        dmesg | grep -iE 'i2c|geni|gpi|dma|icc|defer' | tail -n 20
+        return
+    fi
+    echo "adapter=/dev/i2c-$bus"
+    echo "BC_STATUS[0x08]: $(i2cget -y "$bus" 0x25 0x08 2>&1)"
+    echo 'CONTROL1 read request: opcode 0x05, end 0x00'
+    i2ctransfer -y "$bus" w1@0x25 0x05 2>&1
+    i2cset -y "$bus" 0x25 0x41 0x00 2>&1
+    echo 'OPCODE_READ[0x51..0x52] (response, CONTROL1):'
+    i2ctransfer -y "$bus" w1@0x25 0x51 r2 2>&1
+}
+
+muic_to_usb() {
+    find_muic_bus
+    if [ -z "$bus" ]; then
+        echo 'MAX77705 COM_USB failed: I2C adapter not found'
+        return 1
+    fi
+    if ! bc=$(i2cget -y "$bus" 0x25 0x08 2>&1); then
+        echo "MAX77705 COM_USB failed: BC_STATUS: $bc"
+        return 1
+    fi
+    echo "MAX77705 BC_STATUS=$bc; switching D+/D- to USB"
+    if i2ctransfer -y "$bus" w3@0x25 0x21 0x06 0x09 &&
+            i2cset -y "$bus" 0x25 0x41 0x00; then
+        echo 'MAX77705 COM_USB write completed'
+    else
+        echo 'MAX77705 COM_USB write failed'
+        return 1
+    fi
+}
+
 gadget=/sys/kernel/config/usb_gadget/tabs7
 mkdir -p "$gadget"
 # Linux Foundation gadget ID; serial number identifies this temporary image.
@@ -29,15 +90,43 @@ echo 02:54:53:37:00:02 > "$gadget/functions/ecm.usb0/host_addr"
 ln -s "$gadget/functions/ecm.usb0" "$gadget/configs/c.1/"
 ln -s "$gadget/functions/acm.usb0" "$gadget/configs/c.1/"
 
+tries=0
 while :; do
     udc=$(ls /sys/class/udc | head -n 1)
     [ -n "$udc" ] && break
-    echo 'Waiting for USB device controller' > /dev/kmsg
+    # No USB means no shell: every 10 s put the reason on the console instead.
+    if [ $((tries % 5)) -eq 0 ]; then
+        {
+            show_muic
+            echo "=== no UDC after $((tries * 2)) s; deferred probes:"
+            cat /sys/kernel/debug/devices_deferred 2>&1
+            echo '=== kernel log (usb/phy/defer/error, last 30):'
+            dmesg | grep -v initcall | grep -iE 'usb|dwc|phy|udc|defer|fail|error|smmu|icc|gdsc|regulator' | tail -n 30
+        } > /dev/tty0 2>&1
+    fi
+    tries=$((tries + 1))
     sleep 2
 done
+muic_to_usb > /dev/kmsg 2>&1
 echo "$udc" > "$gadget/UDC"
 ifconfig usb0 192.168.77.2 netmask 255.255.255.0 up
 echo 'USB ready: tablet 192.168.77.2; set host USB interface to 192.168.77.1/24' > /dev/kmsg
+
+# Until the host enumerates us there is still no shell: every 10 s show the
+# controller state (pull-up = DCTL RUN_STOP, link state in DSTS) on screen.
+(
+    dwc=/sys/kernel/debug/usb/$udc
+    while :; do
+        {
+            show_muic
+            echo "=== UDC $udc: state=$(cat /sys/class/udc/$udc/state 2>&1) speed=$(cat /sys/class/udc/$udc/current_speed 2>&1)"
+            echo "mode=$(cat $dwc/mode 2>&1) link_state=$(cat $dwc/link_state 2>&1)"
+            grep -E '^(DCTL|DSTS|DCFG|DEVTEN|GCTL|GSTS|GUSB2PHYCFG\(0\)|GUSB2I2CCTL|GEVNTCOUNT\(0\)) ' $dwc/regdump 2>&1
+            dmesg | grep -iE 'dwc3|udc|gadget|phy|usb' | tail -n 8
+        } > /dev/tty0 2>&1
+        sleep 10
+    done
+) &
 
 # This development image grants a shell only through the direct USB link.
 # Keep telnet bound to the USB address, and expose a second shell over ACM.

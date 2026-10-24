@@ -19,7 +19,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = ROOT / 'hardware/samsung/gts7lwifi/panel/nt36523-ppa957db1.json'
-HEADER = (ROOT / 'linux-sm8250-v6.2/drivers/gpu/drm/panel/'
+HEADER = (ROOT / 'linux-sm8250-v6.18/drivers/gpu/drm/panel/'
           'panel-novatek-nt36523-gts7lwifi.h')
 MAX_PAYLOAD = 16
 

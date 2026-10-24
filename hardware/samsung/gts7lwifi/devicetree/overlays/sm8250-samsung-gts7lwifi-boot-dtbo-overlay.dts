@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/dts-v1/;
+/plugin/;
+
+/*
+ * DTBO-partition entry for a mainline BOOT on hardware revision 7.
+ *
+ * The root properties are copied from the Lineage/Samsung table entry the
+ * bootloader selects today (androidboot.dtbo_idx=6) so its matching sees the
+ * same model, compatible, board-id and Samsung dtbo-version. They select the
+ * entry only; root properties of an overlay are not merged into the base DTB.
+ * The fragment is empty, so the mainline DTB is left unchanged.
+ */
+/ {
+	model = "Samsung GTS7L PROJECT - PV REV0.4 (board-id,7)";
+	compatible = "qcom,kona-mtp", "qcom,kona", "qcom,mtp";
+	qcom,board-id = <8 7>;
+	dtbo-version = <0>;
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+		};
+	};
+};

@@ -1,0 +1,823 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Samsung Galaxy Tab S7 series common device tree
+ * Covers: gts7lwifi (SM-T870)
+ *
+ * Reference: sm8250-lenovo-j716f.dts (same SoC/PMIC family, in this tree)
+ * Downstream: LineageOS android_kernel_samsung_sm8250
+ *             arch/arm64/boot/dts/samsung/gts7l/
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include "sm8250.dtsi"
+#include "pm8150.dtsi"
+#include "pm8150b.dtsi"
+#include "pm8150l.dtsi"
+#include "pm8009.dtsi"
+
+/* This version of sm8250.dtsi does not define an MPSS remote processor. */
+
+/ {
+	chassis-type = "tablet";
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		bootargs = "fw_devlink=permissive clk_ignore_unused pd_ignore_unused loglevel=8 ignore_loglevel initcall_debug panic=0";
+
+		/*
+		 * Bootloader splash in cont_splash_mem, kept alive until msm takes
+		 * over. Portrait 1600x2560 XRGB8888 like the other SM8250 boards that
+		 * share this splash region (sm8250-samsung-common, xiaomi-elish).
+		 */
+		framebuffer0: framebuffer@9c000000 {
+			compatible = "simple-framebuffer";
+			reg = <0 0x9c000000 0 0x2300000>;
+			width = <1600>;
+			height = <2560>;
+			stride = <(1600 * 4)>;
+			format = "a8r8g8b8";
+		};
+	};
+
+	aliases {
+		serial0 = &uart6;
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+		/* GPIO assignment still needs confirmation from the live DTB. */
+		status = "disabled";
+
+		key-volume-down {
+			label = "Volume Down";
+			gpios = <&pm8150l_gpios 3 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+			debounce-interval = <15>;
+		};
+	};
+
+	reserved-memory {
+		/*
+		 * ramoops: 无方便串口时的首要 log 来源
+		 * Match Samsung kona-sec-memory-common.dtsi so recovery can read it.
+		 */
+		ramoops@9fa00000 {
+			compatible = "ramoops";
+			reg = <0x0 0x9fa00000 0x0 0x100000>;
+			record-size = <0x40000>;
+			console-size = <0x40000>;
+			ftrace-size = <0x40000>;
+			pmsg-size = <0x40000>;
+		};
+
+		hdm@9fb00000 {
+			reg = <0 0x9fb00000 0 0x1000>;
+			no-map;
+		};
+
+		rkp@b0200000 {
+			reg = <0 0xb0200000 0 0x200000>;
+			no-map;
+		};
+
+		/* Fixed by firmware at boot; confirmed in the live revision-7 FDT. */
+		uh-heap@b0400000 {
+			reg = <0 0xb0400000 0 0x1400000>;
+			no-map;
+		};
+
+		xbl-uefi-log@80880000 {
+			reg = <0 0x80880000 0 0x14000>;
+			no-map;
+		};
+
+		sec-rdx@100000000 {
+			reg = <1 0 0 0xad00000>;
+			no-map;
+		};
+
+		dfps-data@9e300000 {
+			reg = <0 0x9e300000 0 0x100000>;
+			no-map;
+		};
+
+		cont_splash_mem: memory@9c000000 {
+			reg = <0x0 0x9c000000 0x0 0x2300000>;
+			no-map;
+		};
+
+		/* Samsung reservations in addition to the SoC's firmware regions. */
+		sec-debug@9f000000 {
+			reg = <0 0x9f000000 0 0x800000>;
+			no-map;
+		};
+
+		ss-plog@9f800000 {
+			reg = <0 0x9f800000 0 0x200000>;
+			no-map;
+		};
+
+		tima@b0100000 {
+			reg = <0 0xb0100000 0 0x100000>;
+			no-map;
+		};
+
+		kaslr@a0001000 {
+			reg = <0 0xa0001000 0 0x1000>;
+			no-map;
+		};
+	};
+
+	/* ---- fixed regulators (同 j716f 写法) ---- */
+	vph_pwr: vph-pwr-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "vph_pwr";
+		regulator-min-microvolt = <3700000>;
+		regulator-max-microvolt = <3700000>;
+	};
+
+	vreg_s6c_0p88: smpc6-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "vreg_s6c_0p88";
+		regulator-min-microvolt = <880000>;
+		regulator-max-microvolt = <880000>;
+		regulator-always-on;
+		vin-supply = <&vph_pwr>;
+	};
+};
+
+/*
+ * Fixed carveouts from the T870XXS8DXH1 factory DTB + revision-7 DTBO.
+ * Samsung keeps old unit addresses in several node names while moving reg;
+ * match the physical ranges, not those historical names. DSPs stay disabled.
+ */
+&xbl_aop_mem { reg = <0 0x80603000 0 0x25d000>; };
+&removed_mem { reg = <0 0x80b00000 0 0x6300000>; };
+&camera_mem { reg = <0 0x8fd00000 0 0x500000>; };
+&wlan_mem { reg = <0 0x90200000 0 0x100000>; };
+&ipa_fw_mem { reg = <0 0x90300000 0 0x10000>; };
+&ipa_gsi_mem { reg = <0 0x90310000 0 0xa000>; };
+&gpu_mem { reg = <0 0x9031a000 0 0x2000>; };
+&npu_mem { reg = <0 0x8d400000 0 0x500000>; };
+&video_mem { reg = <0 0x8d900000 0 0x500000>; };
+&cvp_mem { reg = <0 0x8de00000 0 0x500000>; };
+&cdsp_mem { reg = <0 0x8e300000 0 0x1a00000>; };
+&slpi_mem { reg = <0 0x89200000 0 0x1500000>; };
+&adsp_mem { reg = <0 0x8a700000 0 0x2c00000>; };
+&spss_mem { reg = <0 0x8d300000 0 0x100000>; };
+&cdsp_secure_heap { reg = <0 0x90400000 0 0x600000>; };
+
+/* ----------------------------------------------------------------
+ * PMIC regulators（照搬 j716f，两台板型 PMIC 完全一致）
+ * ---------------------------------------------------------------- */
+&apps_rsc {
+	pm8150-rpmh-regulators {
+		compatible = "qcom,pm8150-rpmh-regulators";
+		qcom,pmic-id = "a";
+
+		vdd-s1-supply = <&vph_pwr>;
+		vdd-s2-supply = <&vph_pwr>;
+		vdd-s3-supply = <&vph_pwr>;
+		vdd-s4-supply = <&vph_pwr>;
+		vdd-s5-supply = <&vph_pwr>;
+		vdd-s6-supply = <&vph_pwr>;
+		vdd-s7-supply = <&vph_pwr>;
+		vdd-s8-supply = <&vph_pwr>;
+		vdd-s9-supply = <&vph_pwr>;
+		vdd-s10-supply = <&vph_pwr>;
+		vdd-l1-l8-l11-supply = <&vreg_s6c_0p88>;
+		vdd-l2-l10-supply = <&vreg_bob>;
+		vdd-l3-l4-l5-l18-supply = <&vreg_s6a_0p95>;
+		vdd-l6-l9-supply = <&vreg_s8c_1p35>;
+		vdd-l7-l12-l14-l15-supply = <&vreg_s5a_1p9>;
+		vdd-l13-l16-l17-supply = <&vreg_bob>;
+
+		vreg_s4a_1p8: smps4 {
+			regulator-name = "vreg_s4a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1920000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_s5a_1p9: smps5 {
+			regulator-name = "vreg_s5a_1p9";
+			regulator-min-microvolt = <1900000>;
+			regulator-max-microvolt = <2040000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_s6a_0p95: smps6 {
+			regulator-name = "vreg_s6a_0p95";
+			regulator-min-microvolt = <950000>;
+			regulator-max-microvolt = <1128000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l2a_3p1: ldo2 {
+			regulator-name = "vreg_l2a_3p1";
+			regulator-min-microvolt = <3072000>;
+			regulator-max-microvolt = <3072000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l3a_0p93: ldo3 {
+			regulator-name = "vreg_l3a_0p93";
+			regulator-min-microvolt = <928000>;
+			regulator-max-microvolt = <932000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l5a_0p88: ldo5 {
+			regulator-name = "vreg_l5a_0p88";
+			regulator-min-microvolt = <880000>;
+			regulator-max-microvolt = <880000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l6a_1p2: ldo6 {
+			regulator-name = "vreg_l6a_1p2";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l7a_1p7: ldo7 {
+			regulator-name = "vreg_l7a_1p7";
+			regulator-min-microvolt = <1704000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l9a_1p2: ldo9 {
+			regulator-name = "vreg_l9a_1p2";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l12a_1p8: ldo12 {
+			regulator-name = "vreg_l12a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l17a_2p5: ldo17 {
+			regulator-name = "vreg_l17a_2p5";
+			regulator-min-microvolt = <2496000>;
+			regulator-max-microvolt = <3008000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l18a_0p8: ldo18 {
+			regulator-name = "vreg_l18a_0p8";
+			regulator-min-microvolt = <800000>;
+			regulator-max-microvolt = <920000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	pm8150l-rpmh-regulators {
+		compatible = "qcom,pm8150l-rpmh-regulators";
+		qcom,pmic-id = "c";
+
+		vdd-s1-supply = <&vph_pwr>;
+		vdd-s2-supply = <&vph_pwr>;
+		vdd-s3-supply = <&vph_pwr>;
+		vdd-s4-supply = <&vph_pwr>;
+		vdd-s5-supply = <&vph_pwr>;
+		vdd-s6-supply = <&vph_pwr>;
+		vdd-s7-supply = <&vph_pwr>;
+		vdd-s8-supply = <&vph_pwr>;
+		vdd-l1-l8-supply = <&vreg_s4a_1p8>;
+		vdd-l2-l3-supply = <&vreg_s8c_1p35>;
+		vdd-l4-l5-l6-supply = <&vreg_bob>;
+		vdd-l7-l11-supply = <&vreg_bob>;
+		vdd-l9-l10-supply = <&vreg_bob>;
+		vdd-bob-supply = <&vph_pwr>;
+
+		vreg_bob: bob {
+			regulator-name = "vreg_bob";
+			regulator-min-microvolt = <3008000>;
+			regulator-max-microvolt = <3960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_AUTO>;
+		};
+
+		vreg_s8c_1p35: smps8 {
+			regulator-name = "vreg_s8c_1p4";
+			regulator-min-microvolt = <1350000>;
+			regulator-max-microvolt = <1400000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l9c_2p7: ldo9 {
+			regulator-name = "vreg_l9c_2p7";
+			regulator-min-microvolt = <2704000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-allow-set-load;
+		};
+
+		vreg_l6c_2p9: ldo6 {
+			regulator-name = "vreg_l6c_2p9";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-allow-set-load;
+		};
+
+		vreg_l11c_3p1: ldo11 {
+			regulator-name = "vreg_l11c_3p1";
+			regulator-min-microvolt = <3104000>;
+			regulator-max-microvolt = <3304000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+};
+
+/* ----------------------------------------------------------------
+ * GPI DMA（i2c/spi 控制器依赖）
+ * ---------------------------------------------------------------- */
+&gpi_dma0 { status = "okay"; };
+&gpi_dma1 { status = "okay"; };
+&gpi_dma2 { status = "okay"; };
+
+&qupv3_id_0 { status = "okay"; };
+&qupv3_id_1 { status = "okay"; };
+
+/* MAX77705 MUIC: QUP0 SE0, GPIO28/29; USB switch managed from initramfs. */
+&i2c0 { status = "okay"; };
+&qupv3_id_2 { status = "okay"; };
+
+/* ----------------------------------------------------------------
+ * UART6 — debug serial
+ * ---------------------------------------------------------------- */
+&uart6 {
+	/* The downstream debug UART uses a different serial engine. */
+	status = "disabled";
+};
+
+/* ----------------------------------------------------------------
+ * UFS 内置存储（阶段 B）
+ * ---------------------------------------------------------------- */
+&ufs_mem_hc {
+	/* First boot uses only an initramfs; verify supplies before enabling UFS. */
+	status = "disabled";
+
+	reset-gpios = <&tlmm 156 GPIO_ACTIVE_LOW>;
+	vcc-supply = <&vreg_l17a_2p5>;
+	vcc-max-microamp = <800000>;
+	vccq-supply = <&vreg_l6a_1p2>;
+	vccq-max-microamp = <800000>;
+	vccq2-supply = <&vreg_s4a_1p8>;
+	vccq2-max-microamp = <800000>;
+};
+
+&ufs_mem_phy {
+	status = "disabled";
+
+	vdda-phy-supply = <&vreg_l5a_0p88>;
+	vdda-pll-supply = <&vreg_l9a_1p2>;
+};
+
+/* ----------------------------------------------------------------
+ * USB（阶段 B：peripheral 模式先起 USB networking）
+ * ---------------------------------------------------------------- */
+&usb_1 {
+	/*
+	 * Only the HS PHY is wired up (the QMP USB3 PHY stays off), so there is
+	 * no PIPE clock: without this dwc3 cannot complete DEPCFG and logs
+	 * "failed to enable ep0out" (seen on the first 6.18 boot). Same as the
+	 * Galaxy S20 in sm8250-samsung-common.dtsi.
+	 */
+	qcom,select-utmi-as-pipe-clk;
+	status = "okay";
+};
+
+&usb_1_dwc3 {
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	phys = <&usb_1_hsphy>;
+	phy-names = "usb2-phy";
+};
+
+&usb_1_hsphy {
+	status = "okay";
+
+	vdda-pll-supply = <&vreg_l5a_0p88>;
+	vdda18-supply = <&vreg_l12a_1p8>;
+	vdda33-supply = <&vreg_l2a_3p1>;
+};
+
+&usb_1_qmpphy {
+	status = "disabled";
+
+	vdda-phy-supply = <&vreg_l9a_1p2>;
+	vdda-pll-supply = <&vreg_l18a_0p8>;
+};
+
+/* ----------------------------------------------------------------
+ * PON 电源键 / 音量下键（阶段 B）
+ * ---------------------------------------------------------------- */
+&pon_pwrkey {
+	status = "okay";
+};
+
+&pon_resin {
+	status = "okay";
+	linux,code = <KEY_VOLUMEDOWN>;
+};
+
+/* ----------------------------------------------------------------
+ * TLMM pinctrl
+ * ---------------------------------------------------------------- */
+/* ----------------------------------------------------------------
+ * 触摸 Novatek nvt-ts（阶段 C）
+ * QUP5 = i2c5 (GPIO12=SDA, GPIO13=SCL); IRQ=tlmm15 (QUP5 原 SPI CS 脚)
+ * reset GPIO 待从 downstream 核实（tlmm 编号未知）
+ * ---------------------------------------------------------------- */
+&i2c5 {
+	status = "disabled";
+	clock-frequency = <400000>;
+
+	novatek-ts@62 {
+		compatible = "novatek,nvt-ts";
+		reg = <0x62>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <15 IRQ_TYPE_EDGE_FALLING>;
+		/* TODO: reset-gpios = <&tlmm ??? GPIO_ACTIVE_LOW>; */
+
+		touchscreen-size-x = <2560>;
+		touchscreen-size-y = <1600>;
+		max-touch-num = <10>;
+	};
+};
+
+/* ----------------------------------------------------------------
+ * max77705 充电/电量计（阶段 C）
+ * 与 j716f (bq27541) 不同，不能照抄
+ * i2c 总线号待从 downstream 核实后解注释
+ * ---------------------------------------------------------------- */
+/*
+&i2cN {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	max77705@66 {
+		compatible = "maxim,max77705";
+		reg = <0x66>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <TODO IRQ_TYPE_LEVEL_LOW>;
+	};
+
+	pca9468@57 {
+		compatible = "nxp,pca9468";
+		reg = <0x57>;
+	};
+};
+*/
+
+/* ----------------------------------------------------------------
+ * PCIe0 + QCA6390 Wi-Fi / BT（阶段 E）
+ * perst/wake GPIO 来自 sm8250.dtsi；wlan-en/bt-en 来自 downstream
+ * ---------------------------------------------------------------- */
+&pcie0 {
+	status = "disabled";
+
+	/* sm8250.dtsi 已定义 perst=tlmm79, wake=tlmm81 */
+	vdda-supply = <&vreg_l3a_0p93>;
+};
+
+&pcie0_phy {
+	status = "disabled";
+
+	vdda-phy-supply = <&vreg_l5a_0p88>;
+	vdda-pll-supply = <&vreg_l9a_1p2>;
+};
+
+/* QCA6390 通过 PCIe 枚举，无需单独 DTS 节点；
+ * wlan-en / bt-en 由 rfkill / hci userspace 控制
+ * 若需在 DT 中声明 GPIO：
+ *   wlan-en = tlmm90 (GPIO_ACTIVE_HIGH)
+ *   bt-en   = tlmm76 (GPIO_ACTIVE_HIGH)
+ */
+
+/* ----------------------------------------------------------------
+ * microSD（阶段 E）
+ * cd-gpio = tlmm77; vmmc = pm8150l l9 (2.95V); vqmmc = pm8150l l6
+ * ---------------------------------------------------------------- */
+&sdhc_2 {
+	status = "disabled";
+
+	bus-width = <4>;
+	cd-gpios = <&tlmm 77 GPIO_ACTIVE_LOW>;
+
+	vmmc-supply = <&vreg_l9c_2p7>;
+	vqmmc-supply = <&vreg_l6c_2p9>;
+
+	pinctrl-names = "default", "sleep";
+	pinctrl-0 = <&sdc2_default_state>;
+	pinctrl-1 = <&sdc2_sleep_state>;
+};
+
+/* ----------------------------------------------------------------
+ * 远端处理器（阶段 E）
+ * firmware-name 路径沿用 Samsung 设备命名惯例
+ * ---------------------------------------------------------------- */
+&adsp {
+	status = "disabled";
+	firmware-name = "qcom/sm8250/gts7lwifi/adsp.mbn";
+};
+
+&cdsp {
+	status = "disabled";
+	firmware-name = "qcom/sm8250/gts7lwifi/cdsp.mbn";
+};
+
+&slpi {
+	status = "disabled";
+	firmware-name = "qcom/sm8250/gts7lwifi/slpi.mbn";
+};
+
+/* ----------------------------------------------------------------
+ * 显示 — mainline 6.2
+ *
+ * NT36523 PPA957DB1：1600×2560（每链路 800 宽），video 模式，dual-DSI bonded。
+ *   panel 驱动    drivers/gpu/drm/panel/panel-novatek-nt36523.c
+ *   compatible    samsung,gts7l-nt36523
+ *   初始化/时序   由 scripts/steamos/emit-panel-seq.py 生成
+ *
+ * GPIO（来自 downstream kona-sec-gts7l-display-r00.dtsi）：
+ *   reset = tlmm82, vddlcd = tlmm135, buck = tlmm93,
+ *   esd = tlmm66（上升沿）, ub-con-det = tlmm46
+ *
+ * 尚未在真机点亮；这里打开节点是为了让 6.2 内核能真正 probe 显示链路。
+ * ---------------------------------------------------------------- */
+&mdss {
+	status = "okay";
+};
+
+&mdss_mdp {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	status = "okay";
+	vdda-supply = <&vreg_l9a_1p2>;
+
+	/*
+	 * The panel is driven by both links (vendor topology <2 0 2>), so the
+	 * controllers are bonded: msm halves the horizontal timings per link and
+	 * sends each DCS command to both. dsi0 is the master link and clocks dsi1.
+	 */
+	qcom,dual-dsi-mode;
+	qcom,master-dsi;
+
+	ports {
+		port@1 {
+			dsi0_out: endpoint {
+				remote-endpoint = <&panel_in0>;
+				/* 3 trios: the panel profile says C-PHY, not D-PHY */
+				data-lanes = <0 1 2>;
+			};
+		};
+	};
+};
+
+/*
+ * C-PHY tuning overrides: values from the downstream 4.19 panel driver,
+ * extracted into hardware/samsung/gts7lwifi/panel/nt36523-ppa957db1.json
+ * (samsung,phy_vreg_ctrl_0, phy_ctrl2, phy_offset_*_ctrl,
+ * phy_str_swi_cal_sel_ctrl).
+ */
+&mdss_dsi0_phy {
+	status = "okay";
+	vdds-supply = <&vreg_l5a_0p88>;
+	phy-type = <11>;
+	qcom,cphy-vreg-ctrl-0 = <0x50>;
+	qcom,cphy-cmn-ctrl-2 = <0x64>;
+	qcom,cphy-rescode-offset-top = <0x1f>;
+	qcom,cphy-rescode-offset-bot = <0x1f>;
+	qcom,cphy-rescode-offset-mid = <0x1f>;
+	qcom,cphy-str-swi-cal-sel = <0x04>;
+};
+
+&mdss_dsi1 {
+	status = "okay";
+	vdda-supply = <&vreg_l9a_1p2>;
+
+	qcom,dual-dsi-mode;
+
+	/* Slave DSI — clocks driven from DSI0 PLL */
+	assigned-clock-parents = <&mdss_dsi0_phy 0>, <&mdss_dsi0_phy 1>;
+
+	ports {
+		port@1 {
+			dsi1_out: endpoint {
+				remote-endpoint = <&panel_in1>;
+				data-lanes = <0 1 2>;
+			};
+		};
+	};
+};
+/* panel node appended to &mdss_dsi0 block below */
+
+&mdss_dsi1_phy {
+	status = "okay";
+	vdds-supply = <&vreg_l5a_0p88>;
+	phy-type = <11>;
+	qcom,cphy-vreg-ctrl-0 = <0x50>;
+	qcom,cphy-cmn-ctrl-2 = <0x64>;
+	qcom,cphy-rescode-offset-top = <0x1f>;
+	qcom,cphy-rescode-offset-bot = <0x1f>;
+	qcom,cphy-rescode-offset-mid = <0x1f>;
+	qcom,cphy-str-swi-cal-sel = <0x04>;
+};
+
+/*
+ * Panel supplies, taken from the downstream display DTS
+ * (kona-sec-gts7l-display-r00.dtsi):
+ *   vddlcd (1.8 V) = fixed regulator on tlmm135
+ *   buck           = fixed regulator on tlmm93, 10 ms boost/discharge time
+ * Reset stays on tlmm82.
+ */
+/ {
+	panel_vddio: regulator-panel-vddio {
+		compatible = "regulator-fixed";
+		regulator-name = "panel-vddio";
+		gpio = <&tlmm 135 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		/* On for the bootloader splash; without this probe drives it low. */
+		regulator-boot-on;
+	};
+
+	panel_buck: regulator-panel-buck {
+		compatible = "regulator-fixed";
+		regulator-name = "panel-buck";
+		gpio = <&tlmm 93 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		/* On for the bootloader splash; without this probe drives it low. */
+		regulator-boot-on;
+	};
+};
+
+/*
+ * NT36523 panel node
+ * Driver: drivers/gpu/drm/panel/panel-novatek-nt36523.c
+ *
+ * 连接拓扑（参照 panel-truly-nt35597.c 的 dual-DSI probe 方式）：
+ *   panel port@0 → dsi0_out  (primary, 发初始化命令)
+ *   panel port@1 → dsi1_out  (secondary, 驱动通过 of_graph 自动找到)
+ *
+ * 初始化序列与时序由 scripts/steamos/emit-panel-seq.py 生成，不在此处维护。
+ */
+&mdss_dsi0 {
+	panel@0 {
+		compatible = "samsung,gts7l-nt36523";
+		status = "okay";
+		reg = <0>;
+
+		/* vendor pinctrl: reset 8 mA no pull, ESD 8 mA and UB det 2 mA inputs */
+		pinctrl-names = "default";
+		pinctrl-0 = <&panel_reset_default &panel_ub_det_default &panel_esd_default>;
+
+		reset-gpios = <&tlmm 82 GPIO_ACTIVE_LOW>;
+
+		/* vendor: qcom,panel-supply-entry@0 "vddlcd" and @1 "buck" */
+		vddio-supply = <&panel_vddio>;
+		buck-supply = <&panel_buck>;
+
+		/*
+		 * vendor: samsung,esd-irq-gpio1 (rising) and samsung,ub-con-det.
+		 * Both are pull-less inputs; a rising edge means the panel lost state.
+		 */
+		esd-gpios = <&tlmm 66 GPIO_ACTIVE_HIGH>;
+		ub-con-det-gpios = <&tlmm 46 GPIO_ACTIVE_HIGH>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				panel_in0: endpoint {
+					remote-endpoint = <&mdss_dsi0_out>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+				panel_in1: endpoint {
+					remote-endpoint = <&mdss_dsi1_out>;
+				};
+			};
+		};
+	};
+};
+
+/* Adreno 650 GPU + GMU */
+&gpu {
+	status = "disabled";
+
+	zap-shader {
+		firmware-name = "qcom/sm8250/gts7lwifi/a650_zap.mbn";
+	};
+};
+
+&gmu {
+	status = "disabled";
+};
+
+/* ----------------------------------------------------------------
+ * pinctrl 补充
+ * ---------------------------------------------------------------- */
+&tlmm {
+	/*
+	 * 20-23 are the fingerprint SPI owned by TrustZone: the vendor kernel
+	 * skips every register access to them (msm_gpio_is_valid() with
+	 * CONFIG_SENSORS_FP_SPI_GPIO_START/END = 20/23), and since gpiolib reads
+	 * every line's direction when the chip is added, touching them hangs the
+	 * TLMM probe. 40-43 as on the other SM8250 boards.
+	 */
+	gpio-reserved-ranges = <20 4>, <40 4>;
+
+	/* Panel pins, values from the downstream display DTS. */
+	panel_reset_default: panel-reset-default {
+		pins = "gpio82";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	panel_ub_det_default: panel-ub-det-default {
+		pins = "gpio46";
+		function = "gpio";
+		drive-strength = <2>;
+		input-enable;
+		bias-disable;
+	};
+
+	panel_esd_default: panel-esd-default {
+		pins = "gpio66";
+		function = "gpio";
+		drive-strength = <8>;
+		input-enable;
+		bias-disable;
+	};
+
+	sdc2_default_state: sdc2-default-state {
+		clk {
+			pins = "sdc2_clk";
+			bias-disable;
+			drive-strength = <16>;
+		};
+		cmd {
+			pins = "sdc2_cmd";
+			bias-pull-up;
+			drive-strength = <10>;
+		};
+		data {
+			pins = "sdc2_data";
+			bias-pull-up;
+			drive-strength = <10>;
+		};
+	};
+
+	sdc2_sleep_state: sdc2-sleep-state {
+		clk {
+			pins = "sdc2_clk";
+			bias-disable;
+			drive-strength = <2>;
+		};
+		cmd {
+			pins = "sdc2_cmd";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+		data {
+			pins = "sdc2_data";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+	};
+
+	wlan_en_default: wlan-en-default-state {
+		pins = "gpio90";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	bt_en_default: bt-en-default-state {
+		pins = "gpio76";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+};

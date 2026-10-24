@@ -3,7 +3,7 @@
 
 The downstream 4.19 source is the only place that carries the real DSI
 timings, lane configuration and init sequence for this panel. This script turns
-them into one reviewable JSON document so a mainline 6.2 driver can be written
+them into one reviewable JSON document so a mainline 6.18 driver can be written
 against known values instead of guesses.
 
 Input is the vendor tree under out/ (ignored, not committed):

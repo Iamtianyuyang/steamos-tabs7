@@ -1,11 +1,11 @@
-"""The 6.2 DTS C-PHY tuning must match the extracted vendor panel profile."""
+"""The 6.18 DTS C-PHY tuning must match the extracted vendor panel profile."""
 import json
 from pathlib import Path
 import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-KERNEL = ROOT / 'linux-sm8250-v6.2'
+KERNEL = ROOT / 'linux-sm8250-v6.18'
 DTS = KERNEL / 'arch/arm64/boot/dts/qcom/sm8250-samsung-gts7-common.dtsi'
 PROFILE = ROOT / 'hardware/samsung/gts7lwifi/panel/nt36523-ppa957db1.json'
 DRIVER_PARSE = KERNEL / 'drivers/gpu/drm/msm/dsi/phy/dsi_phy.c'
@@ -37,11 +37,11 @@ class CphyTuningTest(unittest.TestCase):
         self.overrides = self.profile['samsung_phy_overrides']
 
     def test_both_phys_declare_cphy(self):
-        for label in ('dsi0_phy', 'dsi1_phy'):
+        for label in ('mdss_dsi0_phy', 'mdss_dsi1_phy'):
             self.assertIn('phy-type = <11>', node(self.dts, label), label)
 
     def test_override_values_match_the_vendor_profile(self):
-        for label in ('dsi0_phy', 'dsi1_phy'):
+        for label in ('mdss_dsi0_phy', 'mdss_dsi1_phy'):
             body = node(self.dts, label)
             for vendor_key, dt_key in PROPERTY_MAP.items():
                 match = re.search(r'%s = <(0x[0-9a-fA-F]+|\d+)>;' % re.escape(dt_key), body)

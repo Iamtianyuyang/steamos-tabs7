@@ -1,7 +1,7 @@
 # SM-T870 原生蓝牙
 
 运行环境是原生 BusyBox PID 1、Ubuntu 24.04 和厂商 Linux
-4.19.325-cip136-st20-perf-g4478511c4b37。主线 6.2 没有在设备上启动。
+4.19.325-cip136-st20-perf-g4478511c4b37。主线 6.18 没有在设备上启动。
 
 已实测：修复后的内核正常启动；HCI socket 创建、关闭和 CONTROL
 ReadIndexList 成功；匹配 H4 模块加载成功；原厂固件与 RAM NVM 完成下载，

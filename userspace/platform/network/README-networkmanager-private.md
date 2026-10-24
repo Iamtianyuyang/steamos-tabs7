@@ -112,4 +112,4 @@ Phosh 基础安装器和 GNOME 增量安装器均在启动 udev 和网络 worker
 
 - [Ubuntu official InRelease](https://ports.ubuntu.com/ubuntu-ports/dists/noble-updates/InRelease)、[matching source pool](https://ports.ubuntu.com/ubuntu-ports/pool/main/n/network-manager/)；exact 来源以已验证的 Sources stanza 为准。
 - [NM 1.46 route message builder](https://github.com/NetworkManager/NetworkManager/blob/1.46.0/src/libnm-platform/nm-linux-platform.c)；部署所用文件以 Ubuntu 2.8 source 为准。
-- [matching vendor kernel route parser](https://github.com/LineageOS/android_kernel_samsung_sm8250/blob/4478511c4b3738ad117e674810c2dfde154724bf/net/ipv4/fib_frontend.c)及 `fib_semantics.c`；[upstream 非零 guard](https://github.com/torvalds/linux/blob/v6.2/net/ipv4/fib_frontend.c#L776)。
+- [matching vendor kernel route parser](https://github.com/LineageOS/android_kernel_samsung_sm8250/blob/4478511c4b3738ad117e674810c2dfde154724bf/net/ipv4/fib_frontend.c)及 `fib_semantics.c`；[upstream 非零 guard](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/net/ipv4/fib_frontend.c?h=v6.18.58#n789)。

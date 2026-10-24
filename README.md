@@ -1,8 +1,8 @@
 # Samsung Galaxy Tab S7 的 SteamOS 移植
 
 目标设备：**SM-T870 / gts7lwifi**，硬件版本 7。目标是把 Valve 的 **SteamOS ARM
-用户空间（Game Mode + Desktop Mode）完整跑在平板上**，内核目标是**主线 6.2**
-（`linux-sm8250-v6.2/`，双 VIG 显示方案），rootfs 使用 Valve 官方镜像。
+用户空间（Game Mode + Desktop Mode）完整跑在平板上**，内核目标是**主线 6.18 LTS**
+（`linux-sm8250-v6.18/`，双 VIG 显示方案），rootfs 使用 Valve 官方镜像。
 
 当前状态：SteamOS rootfs 已在真机解出并校验，Steam 客户端已安装、**大屏登录页
 已在平板上显示**，私有 Turnip 已在 Adreno 650 上全屏绘制 Vulkan 场景，Steam 内
@@ -11,9 +11,9 @@
 适配**。完整进度、边界与证据见
 [SteamOS 移植文档](docs/steamos/README.md)。
 
-GNOME/Phosh/XFCE 桌面线已从仓库移除。**主线 6.2 至今没有真机启动记录**：
+GNOME/Phosh/XFCE 桌面线已从仓库移除。**主线 6.18 至今没有真机启动记录**：
 目前所有真机结果都是在厂商 Lineage/Samsung 4.19 内核上取得的，这条路径暂时
-保留到 6.2 达到同样状态为止。
+保留到 6.18 达到同样状态为止。
 
 ## 已确认的设备信息
 
@@ -58,7 +58,7 @@ python3 scripts/steamos/inspect-holo-rootfs.py out/steamos/rootfs.img
 
 ## 内核
 
-目标内核是**主线 6.2**：`linux-sm8250-v6.2/`，DTS 入口
+目标内核是**主线 6.18 LTS**：`linux-sm8250-v6.18/`（6.18.58），DTS 入口
 `arch/arm64/boot/dts/qcom/sm8250-samsung-gts7lwifi.dts`。工作区路径含空格，
 Kbuild 不能就地构建，脚本会同步到缓存目录：
 
@@ -66,20 +66,20 @@ Kbuild 不能就地构建，脚本会同步到缓存目录：
 scripts/setup/prepare-tools.sh
 scripts/build/mainline/build-initramfs.sh           # 最小 bring-up initramfs
 scripts/build/mainline/build-bringup.sh image       # 最小 bring-up 内核
-scripts/build/mainline/build-steamos-6.2.sh image   # bring-up + SteamOS 配置层
+scripts/build/mainline/build-steamos-6.18.sh image  # bring-up + SteamOS 配置层
 python3 scripts/build/mainline/verify-artifacts.py
 ```
 
-`build-steamos-6.2.sh` 把 `steamos-6.2.config` 叠在 `gts7lwifi-bringup.config` 上，
-逐条核对 122 项请求是否真的保留（SYSVIPC、F2FS、cgroups/pids、DEVTMPFS 不自动挂载等），
-产物在 `out/steamos-kernel-6.2/`。迁移的成品、映射表、6.2 BOOT 候选和阻塞项见
-[内核迁移：4.19 → 6.2](docs/steamos/kernel-6.2.md)；面板侧见
-[面板与双 VIG 评估](docs/steamos/panel-6.2.md)。
+`build-steamos-6.18.sh` 把 `steamos-6.18.config` 叠在 `gts7lwifi-bringup.config` 上，
+逐条核对每项请求是否真的保留（SYSVIPC、F2FS、cgroups/pids、DEVTMPFS 不自动挂载等），
+产物在 `out/steamos-kernel-6.18/`。为什么选 6.18、移植内容、映射表、BOOT 候选和阻塞项见
+[内核迁移：4.19 → 6.18](docs/steamos/kernel-6.18.md)；面板侧见
+[面板与双 VIG](docs/steamos/panel-6.18.md)。
 
 产物在 `out/bringup/`：`Image`、`Image.gz`、`sm8250-samsung-gts7lwifi.dtb`、
 `initramfs.cpio.gz`、`kernel.config`。默认缓存根是
 `~/.cache/tabs7linux/<项目路径哈希>/`，可用 `TAB_S7_BUILD_ROOT` 指定不含空格或
-冒号的工作目录。**这组 6.2 产物尚未通过真机启动验证**，不能当作可启动内核。
+冒号的工作目录。**这组 6.18 产物尚未通过真机启动验证**，不能当作可启动内核。
 
 真机已验证的启动链目前仍是官方 Lineage/Samsung 4.19 内核、DTB 和 recovery
 DTBO，由 `scripts/build/vendor/build-vendor-linux.py` 构建 BusyBox 控制环境：
@@ -91,8 +91,8 @@ RECOVERY 全分区读回与镜像一致。证据见
 SteamOS 需要的内核变体已在这条 4.19 链上逐项部署：HCI socket 恢复、SYSVIPC
 （`semget()` 曾返回 `ENOSYS`）、无 DEVTMPFS 下的热插拔节点服务。内核配置在
 `hardware/samsung/gts7lwifi/kernel/configs/steamos-*.config`，核验脚本为
-`scripts/steamos/verify-ipc-kernel.py`。切到 6.2 后这些配置项要按主线 Kconfig
-重新映射。
+`scripts/steamos/verify-ipc-kernel.py`。切到 6.18 后这些配置项按主线 Kconfig
+重新映射，映射表见内核迁移文档。
 
 写 BOOT 前用一条命令串起全部离线预检（分区快照、布局、身份、AVB、initramfs 逐项比对、
 只换 ramdisk 的重建）：
@@ -159,4 +159,4 @@ USB ECM 使用平板地址 `192.168.77.2/24`，主机接口配置为 `192.168.77
 - 已通过：双 VIG 完整画面（两个 VIG 各绘 800 像素宽左右半屏）与触摸映射。
 - 尚未完成：独立 Game Mode（gamescope 自持 KMS）、Steam Input 虚拟手柄节点、
   游戏启动与性能验收。
-- 尚未验证：主线 6.2 真机启动（目标内核，构建入口已就绪，无启动记录）。
+- 尚未验证：主线 6.18 真机启动（目标内核，构建入口已就绪，无启动记录）。

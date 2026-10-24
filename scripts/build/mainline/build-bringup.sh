@@ -23,7 +23,7 @@ export PATH="$project_root/out/tools/llvm/usr/bin:$PATH"
 for tool in rsync make clang-18 ld.lld-18 llvm-ar-18 llvm-nm-18 llvm-objcopy-18 llvm-strip-18; do
     command -v "$tool" >/dev/null || { echo "Missing tool: $tool" >&2; exit 1; }
 done
-rsync -a --delete --exclude=.git/ "$project_root/linux-sm8250-v6.2/" "$build_root/src/"
+rsync -a --delete --exclude=.git/ "$project_root/linux-sm8250-v6.18/" "$build_root/src/"
 cp "$project_root/hardware/samsung/gts7lwifi/kernel/configs/gts7lwifi-bringup.config" "$build_root/bringup.config"
 
 kmake=(make -C "$build_root/src" O="$build_root/obj" ARCH=arm64 LLVM=-18)

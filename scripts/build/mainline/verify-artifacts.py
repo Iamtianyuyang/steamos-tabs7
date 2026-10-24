@@ -32,7 +32,8 @@ def main():
         result = subprocess.check_output(['fdtget', '-t', 'x', str(dtb), node, prop], text=True)
         return [int(value, 16) for value in result.split()]
 
-    assert cells('/', 'qcom,board-id') == [8, 7]
+    # base DTB stays 0 0 like the vendor one; the DTBO entry supplies 8 7
+    assert cells('/', 'qcom,board-id') == [0, 0]
     assert cells('/', 'qcom,msm-id') == [356, 0x20001]
     assert cells('/reserved-memory', '#address-cells') == [2]
     assert cells('/reserved-memory', '#size-cells') == [2]
@@ -91,8 +92,8 @@ def main():
         manifest['files'][name] = {'size': path.stat().st_size,
                                    'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
     for relative in ['hardware/samsung/gts7lwifi/kernel/configs/gts7lwifi-bringup.config', 'boot/initramfs/init',
-                     'linux-sm8250-v6.2/arch/arm64/boot/dts/qcom/sm8250-samsung-gts7lwifi.dts',
-                     'linux-sm8250-v6.2/arch/arm64/boot/dts/qcom/sm8250-samsung-gts7-common.dtsi']:
+                     'linux-sm8250-v6.18/arch/arm64/boot/dts/qcom/sm8250-samsung-gts7lwifi.dts',
+                     'linux-sm8250-v6.18/arch/arm64/boot/dts/qcom/sm8250-samsung-gts7-common.dtsi']:
         manifest['files'][relative] = {'sha256': hashlib.sha256((root / relative).read_bytes()).hexdigest()}
     (artifacts / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'ARM64 Image/gzip, {len(requested)} config settings, DTB, {len(reservations)} non-overlapping reservations, and static initramfs verified.')

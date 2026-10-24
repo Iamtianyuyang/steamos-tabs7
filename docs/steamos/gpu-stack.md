@@ -2,7 +2,7 @@
 
 SM-T870 已在原生 Ubuntu 24.04、Lineage/Samsung 4.19.325 内核上使用 Adreno 650 v3 加速 Phoc 合成。路径为私有 Mesa 25.2.8 Turnip KGSL → Vulkan → Gallium Zink → EGL/GLES/GBM，继续由已有双 VIG wlroots 显示。用户已确认桌面明显更流畅，完整显示与触摸正常。
 
-这里的“原生”指 BusyBox PID 1 启动的 Linux，不依赖 Android 用户空间或 libhybris。GPU 仍使用厂商 KGSL 内核接口；这不代表主线 MSM GPU 驱动或主线 6.2 已在平板工作。`/dev/dri/renderD128` 属于 `msm_drm` 的 SDE 显示设备，不能凭该节点认定它是 3D GPU。
+这里的“原生”指 BusyBox PID 1 启动的 Linux，不依赖 Android 用户空间或 libhybris。GPU 仍使用厂商 KGSL 内核接口；这不代表主线 MSM GPU 驱动或主线 6.18 已在平板工作。`/dev/dri/renderD128` 属于 `msm_drm` 的 SDE 显示设备，不能凭该节点认定它是 3D GPU。
 
 ## 已验证的范围
 

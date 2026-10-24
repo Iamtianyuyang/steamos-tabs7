@@ -116,7 +116,7 @@ python3 scripts/build/vendor/build-vendor-linux.py
 ACM；IP 与 MAC 沿用主线测试环境。pstore 提前挂载且不清理。启动证据
 应包含 USB shell 中的 `uname`、PID 1、挂载表和 `/init` 的内核日志标记。
 这是厂商 4.19 内核上的原生 Linux 用户空间对照；即使成功，也不代表
-主线 6.2 或完整桌面发行版已移植完成。
+主线内核或完整桌面发行版已移植完成。
 
 ### 第四次测试：原生用户空间已启动
 
@@ -157,7 +157,7 @@ telnet 192.168.77.2
 Recovery 分区现在安装此镜像，重新进入 Recovery 可启动 RAM Linux；
 正常开机仍使用原厂 BOOT 启动 Android。要返回 Android，可长按
 「电源＋音量下」到黑屏，松开所有按键等待启动。RAM 中修改的文件不会
-随重启保存，图形界面与完整发行版尚未配置。主线 6.2 尚未成功启动。
+随重启保存，图形界面与完整发行版尚未配置。主线内核尚未成功启动。
 
 ## 第五次测试：Linux 迁入 BOOT 分区，RECOVERY 换为 TWRP（2026-10-24）
 
@@ -219,7 +219,7 @@ BOOT（`f65cde70…`）的 AVB 签名、header v2、从该 BOOT 解出的 ramdis
   `out/steamos/steamos-selector-boot/boot.img`（`f65cde70…`，与此前设备读回一致），
   需要时从 Download mode 写回；写入前的四分区快照在 `out/steamos/native-preflash3/`。
 
-### userdata 探测兼容 6.2（2026-10-24，第二次写入）
+### userdata 探测兼容主线内核（2026-10-24，第二次写入）
 
 `start-persistent-gui` 改为先读 GPT `partlabel`、再回退 `uevent PARTNAME` 后重新
 生成 initramfs 并写入 BOOT：
@@ -235,5 +235,5 @@ BOOT（`f65cde70…`）的 AVB 签名、header v2、从该 BOOT 解出的 ramdis
   因为树在上一次启动已经迁移）。PID 1 为 systemd，`tabs7-gamescope-session.service`
   active。
 - 4.19 厂商内核没有暴露 `partlabel`，所以这次实际走的是回退分支；`partlabel` 分支
-  要等主线 6.2 首次启动才算真机验证。
+  要等主线 6.18 首次启动才算真机验证。
 - 回退镜像：`out/steamos/boot-preflight-20261024-143134/boot/boot.img`（`0eb66dea…`）。

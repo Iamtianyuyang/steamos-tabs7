@@ -1,7 +1,7 @@
 # Galaxy Tab S7 Wi-Fi (SM-T870 / gts7lwifi) → 主线 Linux 设备树移植清单
 
 这是一份早期草稿记录，勾选项不能视为真机验收。当前构建使用
-`linux-sm8250-v6.2/arch/arm64/boot/dts/qcom/`；早期独立 DTS/DTSI 已归档到
+`linux-sm8250-v6.18/arch/arm64/boot/dts/qcom/`；早期独立 DTS/DTSI 已归档到
 `hardware/samsung/gts7lwifi/devicetree/drafts/`，下游参考保存在同级 `vendor/`。
 下文的树形结构和 include 名称描述内核源码内部的建议布局。
 

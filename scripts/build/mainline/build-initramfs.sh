@@ -23,7 +23,7 @@ cp "$busybox" "$rootfs/bin/busybox"
 chmod 755 "$rootfs/bin/busybox"
 cp "$project_root/boot/initramfs/init" "$rootfs/init"
 chmod 755 "$rootfs/init"
-for applet in sh mount mkdir echo sleep ls head ln ifconfig telnetd setsid dmesg cat ip reboot poweroff; do
+for applet in sh mount mkdir echo sleep ls head tail grep ln readlink ifconfig telnetd setsid dmesg cat ip i2cget i2cset i2ctransfer reboot poweroff; do
     ln -s busybox "$rootfs/bin/$applet"
 done
 find "$rootfs" -type d -exec chmod 755 {} +
