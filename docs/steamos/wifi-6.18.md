@@ -80,27 +80,66 @@ Samsung 的 `pm8150a` 就是主线的 `pm8150l`，所以 `pm8150a_s8` 对应 `vr
 
 ## 本阶段验证了什么
 
+### 源码级
+
 | 项目 | 结果 |
 | --- | --- |
-| 配置 | `build-steamos-6.18.sh config <display> <audio> <wifi>`：**224 项请求全部保留** |
+| 配置 | `build-steamos-6.18.sh config <display> <audio> <wifi>`：225 项请求全部保留 |
 | 编译 | `pwrseq-qcom-wcn.o`、`pci-pwrctrl-pwrseq.o`、`pcie-qcom.o`、`ath11k/core.o`、`ath11k/mhi.o` 均 0 error |
-| DTB | `cpp` + `dtc` 生成成功（125305 → 126685 字节），节点与 phandle 链完整 |
+| DTB | `cpp` + `dtc` 生成成功，节点与 phandle 链完整 |
 | 仓库测试 | `tests/steamos/test_wifi_pmu.py` 全部通过 |
 
-**没有验证的**：没有真机启动，因此没有 PCIe link、没有 `lspci` 输出、没有
-ath11k probe。**固件也还不在镜像里**——`amss.bin`、`m3.bin` 与匹配的 BDF 还没
-进入 `lib/firmware`，所以这一阶段之后即使上机，ath11k 也应当在 firmware 加载
-处失败。按项目规则，这些都不能写成硬件结果。
+### 真机（2026-10-25，冷启动到 SteamOS 用户空间）
+
+候选 BOOT 为 `out/steamos-kernel-6.18/wifi-pmu2/boot.img`（SHA-256
+`72dc9b8845607d87772cb1b7e8e22885e4842d1a7f0010e98c7c33b266996d20`，71,303,168
+字节），写 `/dev/sda22` 后读回哈希一致；内核 `Image` 为
+`89e88f793d5344fe1fb67b8c5c917b7ffb055fd6bcd9859cf0aa65d06562d0cd`，shim 为
+`c04cdc72354db6fe330d1415d6409f7289a39186c74b5939d30861f58de32343`。
+镜像 = 上一轮 BOOT 的三个载荷中只换内核与 shim，ramdisk 与厂商 DTB 原样沿用
+（`out/deployed/` 保存了写入前的 BOOT 与解包结果，可直接回退）。
+
+| 观察 | 证据 |
+| --- | --- |
+| PCIe0 链路训练成功 | `pcieport 0000:00:00.0`，`0000:01:00.0` 上线，`current_link_speed` 5.0 GT/s（`max` 8.0） |
+| 设备枚举为 QCA6390 | `/sys/bus/pci/devices/0000:01:00.0`：`0x17cb` / `0x1101`，根端口 `0x010b` |
+| PMU 时序驱动绑定 | `/sys/bus/platform/drivers/pwrseq-qcom_wcn/qca6390-pmu` |
+| 消费者绑定到 DT 节点 | `/sys/bus/platform/drivers/pci-pwrctrl-pwrseq/1c00000.pcie:pcie@0:wifi@0` |
+| ath11k 识别芯片 | `ath11k_pci 0000:01:00.0: qca6390 hw2.0`，32 个 MSI 向量，BAR 已分配 |
+| 固件缺失如预期 | `Direct firmware load for ath11k/QCA6390/hw2.0/amss.bin failed with error -2` → `failed to start mhi: -110` |
+
+因此**电源、PCIe 和驱动绑定已经过真机确认**；`ath11k` 停在 MHI 启动，正是
+本阶段预期的固件缺口（镜像里没有 `lib/firmware/ath11k`）。没有 netdev：`/sys/class/net`
+只有 `lo` 和 `usb0`，所以还没有扫描、关联或 IP，这些都不能写成已完成。
+
+启动期另见 `qcom-pcie 1c00000.pcie: Device not found`：这一行来自第一次 probe
+在链路就绪前的那次检查，随后重试成功并完整枚举，不是最终失败。日志和 sysfs
+快照保存在 ignored `out/wifi-6.18/`：`boot2-dmesg.txt`、`boot2-facts.txt`、
+`flash-write2.txt`，上一轮无 Wi-Fi 配置的基线是 `baseline-pcie-dmesg.txt`。
+
+### 上机才发现的配置缺口
+
+第一次上机时 PCIe 只停在 deferred probe，`1c06000.phy` 从未 probe：原因是
+`CONFIG_PHY_QCOM_QMP_PCIE` 没有开。该符号 `default PHY_QCOM_QMP`，而
+`allnoconfig` 只对**有 prompt** 的符号取默认值以外的值，所以片段没写它就等于没开，
+症状是没有任何错误日志、只是永远 defer。片段已补 `GENERIC_PHY` /
+`PHY_QCOM_QMP` / `PHY_QCOM_QMP_PCIE`，测试也锁住了。
+
+### 两处与操作相关的细节
+
+- 该内核没有 `CONFIG_MAGIC_SYSRQ`，`/proc/sysrq-trigger` 不存在；主线的
+  `reboot`（BusyBox）在 initramfs 里没有生效，`reboot -f` 可以。
+- 写盘通道用的是设备上的 BusyBox：`nc -l -p <port>` 接收、`dd` 写 BOOT、
+  `sha256sum` 双侧校验。SteamOS 用户空间起来后 `/tmp` 不存在，落到
+  `/dev/shm`；`nc` 监听进程必须在 telnet 会话保持打开期间接收，否则会被 SIGHUP。
 
 ## 下一步（未做）
 
 1. 从本机 vendor 逻辑分区取 QCA6390 固件，按 ath11k 的路径布局
-   （`ath11k/QCA6390/hw2.0/`）落地并逐文件校验；BDF 必须来自这台的
-   `bdwlan.e05`/`elf` 变体，不能用通用 blob。
-2. 真机冷启动，先看 `lspci` 是否出现 `17cb:1101`、再看
-   `dmesg | grep -E 'pcie|ath11k|pwrseq'`，确认电源时序与 PCIe link。
-3. 再确认扫描/关联；NetworkManager 在主线 mac80211 路径上不需要 vendor 那套
-   零 gateway 路由补丁。
+   （`ath11k/QCA6390/hw2.0/amss.bin`、`m3.bin`、`board-2.bin`）落地并逐文件
+   校验；BDF 必须来自这台的 `bdwlan.e05`/`elf` 变体，不能用通用 blob。
+2. 重新上机，确认 MHI 启动、`FW_READY` 与 `wlan0` 出现，再看扫描与关联；
+   NetworkManager 在主线 mac80211 路径上不需要 vendor 那套零 gateway 路由补丁。
 
 vmlinux 中已有的相关驱动入口：`qcom_qca6390_pmu`（pwrseq provider）、
 `pci_pwrctrl_pwrseq`（消费者）、`ath11k_pci`。

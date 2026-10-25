@@ -187,7 +187,8 @@ def test_pci_device_and_host_are_enabled():
 
 def test_config_fragment_asks_for_the_driver_stack():
     text = CONFIG.read_text()
-    for symbol in ('CONFIG_PCI', 'CONFIG_PCIE_QCOM', 'CONFIG_POWER_SEQUENCING',
+    for symbol in ('CONFIG_PCI', 'CONFIG_PCIE_QCOM', 'CONFIG_PHY_QCOM_QMP_PCIE',
+                   'CONFIG_POWER_SEQUENCING',
                    'CONFIG_POWER_SEQUENCING_QCOM_WCN', 'CONFIG_WLAN',
                    'CONFIG_WLAN_VENDOR_ATH', 'CONFIG_CFG80211', 'CONFIG_MAC80211',
                    'CONFIG_ATH11K', 'CONFIG_ATH11K_PCI', 'CONFIG_RFKILL',
