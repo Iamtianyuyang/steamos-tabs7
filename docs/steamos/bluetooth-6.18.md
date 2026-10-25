@@ -276,6 +276,22 @@ Sinks:
 这轮排查里唯一"非代码"的坑值得记下：客户端把默认 sink 抢走后，桌面与 Steam
 的声音都会跟着去那台设备，看起来就像"连上了但没声音"。
 
+用户随后再次报告"刚才有声、现在没声，选输出设备也没用"。复查时耳机仍然连着，
+但默认 sink 已经回到内置扬声器（`alsa_output.sm-t870.speaker`）——之前本机
+`tianyy-L16` 被移除的过程中，WirePlumber 把"已配置的默认设备"落到了扬声器上，
+之后耳机重连不会自动夺回。`wpctl set-default` 重新指到耳机后，
+`Default Configured Devices` 也更新为 `bluez_output.88_92_CC_E5_1D_AE.1`，
+并做了断/连复验：
+
+| 操作 | 默认 sink |
+| --- | --- |
+| 断开耳机 | 回到 `alsa_output.sm-t870.speaker` |
+| 重新连接耳机 | 自动切回 `bluez_output.88_92_CC_E5_1D_AE.1`（aac / a2dp-sink） |
+
+另外确认 `bluetooth.autoswitch-to-headset-profile = true`（默认值，未改）。
+注意 Steam 客户端里的"音频输出设备"只影响 Steam 自己的流，**系统默认 sink 才是
+gamescope/桌面音频的去向**，两者不一致时会出现"选了设备但没声音"。
+
 ### 仍未做
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
