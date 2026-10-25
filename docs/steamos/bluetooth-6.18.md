@@ -292,6 +292,33 @@ Sinks:
 注意 Steam 客户端里的"音频输出设备"只影响 Steam 自己的流，**系统默认 sink 才是
 gamescope/桌面音频的去向**，两者不一致时会出现"选了设备但没声音"。
 
+### AAC 协商成功但不出声 → 固定 SBC
+
+用户报告"测试时有声、之后没声"。复查时链路、transport、默认 sink、音量都正常，
+`pw-play` 也返回 0，但耳机安静。用编码器做对照：
+
+| 编码 | 结果 |
+| --- | --- |
+| AAC（`sep2/fd5`） | transport ready、`pw-play` rc=0、**无声** |
+| **SBC（`sep1/fd7`）** | transport ready、`pw-play` rc=0、**有声** |
+
+同一副耳机、同一条链路，唯一差别是编码器，所以是这套 QCA6390 固件 +
+PipeWire 的 AAC 路径有问题（数据发出去了，耳机解不出来）。
+
+修复：在 WirePlumber 的 drop-in（仓库文件
+`userspace/steamos/wireplumber/99-tabs7-audio.conf`）里固定 SBC：
+
+```conf
+monitor.bluez.properties = {
+  bluez5.codecs = [ sbc ]
+}
+```
+
+部署后 `api.bluez5.codec` 变为 `sbc`，蓝牙端点只剩 `A2DPSink/sbc`、
+`A2DPSource/sbc`，重连后 `pw-play` 出声，用户确认听到。
+
+若将来固件或耳机让 AAC 正常，删掉这段即可恢复多编码器协商。
+
 ### 仍未做
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；

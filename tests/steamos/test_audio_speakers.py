@@ -195,3 +195,11 @@ def test_wireplumber_config_keeps_bluetooth_working():
     conf = (ROOT / 'userspace/steamos/wireplumber/99-tabs7-audio.conf').read_text()
     assert 'monitor.bluez.seat-monitoring = disabled' in conf
     assert 'wireplumber.profiles' in conf
+
+
+def test_wireplumber_prefers_sbc_for_bluetooth_audio():
+    """AAC negotiates on this controller but plays silence; SBC works."""
+    conf = (ROOT / 'userspace/steamos/wireplumber/99-tabs7-audio.conf').read_text()
+    assert 'monitor.bluez.properties' in conf
+    assert 'bluez5.codecs = [ sbc ]' in conf
+    assert 'aac' not in conf.split('monitor.bluez.properties')[1].split('}')[0]
