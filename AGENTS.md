@@ -13,9 +13,9 @@
 - Kernel: `linux-sm8250-v6.18/` (kernel.org 6.18.58 plus the project changes
   listed in that document) is the target kernel tree and the canonical DTS
   location (`arch/arm64/boot/dts/qcom/`), built with
-  `scripts/build/mainline/`. Mainline 6.18.58 has booted to the RAM initramfs
-  on this hardware, with USB ECM/ACM and telnet working; the persistent SteamOS
-  boot remains unverified. The vendor Lineage/Samsung 4.19 path
+  `scripts/build/mainline/`. Mainline 6.18.58 has booted automatically into
+  SteamOS Game Mode with Turnip Adreno 650, systemd, NTP and a persistent
+  outer USB/telnet debug shell. The vendor Lineage/Samsung 4.19 path
   (`scripts/build/vendor/`, `scripts/build/bluetooth/`) stays available until
   6.18 reaches the same state. Never describe a 6.18 result as a hardware
   result without a real boot log.
@@ -30,8 +30,8 @@
 - SteamOS work status, rootfs provenance and acceptance boundaries live in
   [the SteamOS document](docs/steamos/README.md). Native boot evidence lives in
   [docs/boot/native-boot-tests.md](docs/boot/native-boot-tests.md). Mainline 6.18
-  initramfs/USB evidence is in `docs/steamos/kernel-6.18.md`; the full SteamOS
-  boot remains unverified on hardware.
+  initramfs/USB and Game Mode evidence is in `docs/steamos/kernel-6.18.md`;
+  peripherals, Proton and Desktop Mode have separate acceptance boundaries.
 - Use project skills `device-tree`, `cross-gcc`, `device-drivers`, and
   `kernel-debugging` when applicable.
 - **Never let a single command block longer than two minutes.** Long waits are not

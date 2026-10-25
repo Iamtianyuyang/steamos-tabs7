@@ -1,10 +1,10 @@
 #!/bin/sh
-# Hand the running initramfs over to the SteamOS tree on userdata.
+# Prepare the SteamOS tree on userdata without replacing the debug PID 1.
 #
 # Called by /init as root with the USB/telnet shells already up. Success means
 # /newroot holds a validated SteamOS root (bind mount plus a real devtmpfs) and
-# the caller performs switch_root. Any failure returns to the caller, which
-# keeps the RAM shells, so nothing here may leave userdata mounted on error.
+# the caller may start systemd in a namespace. Any failure returns to the caller,
+# which keeps the RAM shells, so nothing here may leave userdata mounted on error.
 set -eu
 
 BB=/bin/busybox
@@ -83,9 +83,8 @@ is_steamos_tree() {
 "$BB" grep -qw f2fs /proc/filesystems || fail 'built-in F2FS is unavailable'
 
 # Enumerate GPT-labelled partitions. Never fall back to a guessed device number.
-# Mainline exposes the GPT name as the partlabel attribute; the vendor 4.19 kernel
-# only reports it as PARTNAME in uevent, so accept either and count each device
-# once. CONFIG_EFI_PARTITION supplies partlabel on mainline.
+# Prefer partlabel where available; the rev7 6.18 boot exposes the GPT name only
+# as PARTNAME in uevent, like the vendor 4.19 kernel. Count each device once.
 userdata_device=
 partition_count=0
 for block_directory in /sys/class/block/*; do

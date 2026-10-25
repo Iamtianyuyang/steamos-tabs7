@@ -1,33 +1,23 @@
 #!/bin/bash
-# SM-T870 Game Mode: the private two-VIG gamescope owns KMS directly and runs
-# the native ARM64 Steam client in Big Picture mode. Started by
-# tabs7-gamescope-session.service as the steamos user.
+# SM-T870 Game Mode on the mainline msm DPU and Turnip, running the native
+# ARM64 Steam client. Started by tabs7-gamescope-session.service as steamos.
 set -eu
 
-split=$(cat /etc/tabs7linux/sm-t870-split)
-case "$split" in
-    *[!0-9,]*|'') echo 'Invalid /etc/tabs7linux/sm-t870-split' >&2; exit 1 ;;
-esac
-
 prefix=/usr/local/lib/tabs7linux
-icd=$prefix/turnip-steamos-wsi/turnip-steamos-wsi.icd.json
-export GAMESCOPE_SM_T870_SPLIT=$split
-export VK_ICD_FILENAMES=$icd VK_DRIVER_FILES=$icd TU_DEBUG=noubwc
+icd=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
+export VK_ICD_FILENAMES=$icd VK_DRIVER_FILES=$icd
 export LIBSEAT_BACKEND=seatd
 export XDG_CURRENT_DESKTOP=gamescope XDG_SESSION_TYPE=wayland
 export SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0
 
-# Steam's CEF uses GL through the private Zink-on-KGSL bridge.
 steam_env=(
-    LD_LIBRARY_PATH=$prefix/mesa-zink-gnome-x11/lib
-    LIBGL_DRIVERS_PATH=$prefix/mesa-zink-gnome-x11/lib/dri
     MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink
-    TABS7_ZINK_KGSL=1 LIBGL_KOPPER_DISABLE=1
+    LIBGL_KOPPER_DISABLE=1
 )
 
 # The panel is native portrait 1600x2560; "right" is upright landscape
 # (verified on hardware; "left" is upside down).
-exec "$prefix/gamescope-sm-t870/bin/gamescope" --backend drm --steam \
+exec /usr/bin/gamescope --backend drm --steam \
     --force-orientation right \
     -- /usr/bin/env "${steam_env[@]}" \
     "$prefix/steamos/steam-client.sh" -gamepadui -steamos3

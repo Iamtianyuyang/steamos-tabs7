@@ -1,7 +1,9 @@
 # 显示路径：面板与双 VIG（主线 6.18）
 
-主线 6.18 的显示路径完全没有在真机跑过；本文记录从厂商源码里拿到的**权威面板参数**、
-6.18 树里已经存在的东西、两者之间的差距，以及按依赖排出的工作顺序。
+主线 6.18 已在真机出现 DSI-1 `connected`、1600x2560@120 模式，并由系统 gamescope
+选中该连接器持续运行；Turnip Adreno 650 与 Steam Game Mode 已同时工作。启动期仍记录过
+显示 SMMU fault 和 DSI command timeout，具体双 VIG 平面分配仍需单独核验，不能宣称所有
+显示问题已解决。本文保留厂商权威参数、实现差距和后续排查顺序。
 
 面板参数的机器可读版本是
 [hardware/samsung/gts7lwifi/panel/nt36523-ppa957db1.json](../../hardware/samsung/gts7lwifi/panel/nt36523-ppa957db1.json)，

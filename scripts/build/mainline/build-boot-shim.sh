@@ -15,7 +15,7 @@ dtb=$(realpath "${2:-$project_root/out/bringup/sm8250-samsung-gts7lwifi.dtb}")
 out_dir=$project_root/out/boot-shim
 # Paths with spaces break .incbin quoting and Kbuild alike; build in the cache.
 work=${XDG_CACHE_HOME:-$HOME/.cache}/tabs7linux/boot-shim-$project_id
-reserve=$((16 << 20))
+reserve=$((20 << 20))
 export PATH="$project_root/out/tools/llvm/usr/bin:$PATH"
 
 rm -rf "$work"

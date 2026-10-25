@@ -26,9 +26,14 @@ class SteamOSConfigTest(unittest.TestCase):
         self.steamos = settings(STEAMOS)
 
     def test_systemd_requirements_are_requested(self):
-        required = ['CONFIG_FHANDLE=y', 'CONFIG_CGROUPS=y', 'CONFIG_CGROUP_PIDS=y',
+        required = ['CONFIG_FHANDLE=y', 'CONFIG_FUTEX=y', 'CONFIG_CGROUPS=y', 'CONFIG_CGROUP_PIDS=y',
                     'CONFIG_NAMESPACES=y', 'CONFIG_USER_NS=y', 'CONFIG_PID_NS=y',
-                    'CONFIG_AUTOFS_FS=y']
+                    'CONFIG_AUTOFS_FS=y', 'CONFIG_EPOLL=y', 'CONFIG_SIGNALFD=y',
+                    'CONFIG_TIMERFD=y', 'CONFIG_EVENTFD=y', 'CONFIG_AIO=y',
+                    'CONFIG_IO_URING=y', 'CONFIG_INOTIFY_USER=y', 'CONFIG_FANOTIFY=y',
+                    'CONFIG_IPV6=y', 'CONFIG_FILE_LOCKING=y', 'CONFIG_BINFMT_MISC=y',
+                    'CONFIG_POSIX_MQUEUE=y', 'CONFIG_SECCOMP=y', 'CONFIG_SECCOMP_FILTER=y',
+                    'CONFIG_BPF_SYSCALL=y']
         for entry in required:
             symbol, _, value = entry.partition('=')
             self.assertEqual(self.steamos.get(symbol), value, entry)
@@ -41,6 +46,8 @@ class SteamOSConfigTest(unittest.TestCase):
 
     def test_userdata_filesystem_is_built_in(self):
         self.assertEqual(self.steamos.get('CONFIG_F2FS_FS'), 'y')
+        self.assertEqual(self.steamos.get('CONFIG_QUOTA'), 'y',
+                         'the on-device F2FS quota feature requires CONFIG_QUOTA for RW mounts')
 
     def test_devtmpfs_is_not_mounted_by_the_kernel(self):
         self.assertEqual(self.base.get('CONFIG_DEVTMPFS'), 'y')

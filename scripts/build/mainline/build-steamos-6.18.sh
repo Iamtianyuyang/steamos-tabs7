@@ -54,13 +54,13 @@ lines, order = {}, []
 def record(path):
     for line in path.read_text().splitlines():
         stripped = line.strip()
-        if not stripped.startswith('CONFIG_'):
-            continue
-        if stripped.startswith('# '):
+        if stripped.startswith('# CONFIG_'):
             symbol = stripped.split()[1]
             value = 'not set'
-        else:
+        elif stripped.startswith('CONFIG_'):
             symbol, _, value = stripped.partition('=')
+        else:
+            continue
         if symbol not in lines:
             order.append(symbol)
         lines[symbol] = (value, path.name)
@@ -157,8 +157,8 @@ manifest = {'kind': 'mainline 6.18 SteamOS kernel', 'target': target,
             'extra_configs': extras,
             'kernel_version': version, 'artifacts': artifacts,
             'device_write_performed': False, 'hardware_boot_observed': False,
-            'notes': ['mainline 6.18 has never booted on this device',
-                      'the initramfs userdata lookup still reads uevent PARTNAME, which mainline does not provide']}
+            'notes': ['RAM initramfs and USB are hardware-verified; persistent SteamOS needs separate validation',
+                      'userdata accepts partlabel or uevent PARTNAME; rev7 6.18 uses PARTNAME']}
 (out_dir / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(f'{target}: {version}')
 for name, info in artifacts.items():

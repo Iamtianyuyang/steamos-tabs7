@@ -1,5 +1,5 @@
 #!/bin/sh
-# RAM-only USB diagnosis environment. No internal partitions are mounted.
+# Keep this RAM USB shell as PID 1 while SteamOS runs in a nested namespace.
 export PATH=/bin:/sbin
 mount -t devtmpfs devtmpfs /dev
 mount -t proc proc /proc
@@ -110,6 +110,7 @@ done
 muic_to_usb > /dev/kmsg 2>&1
 echo "$udc" > "$gadget/UDC"
 ifconfig usb0 192.168.77.2 netmask 255.255.255.0 up
+ip route replace default via 192.168.77.1 dev usb0
 echo 'USB ready: tablet 192.168.77.2; set host USB interface to 192.168.77.1/24' > /dev/kmsg
 
 # Until the host enumerates us there is still no shell: every 10 s show the
@@ -127,10 +128,48 @@ echo 'USB ready: tablet 192.168.77.2; set host USB interface to 192.168.77.1/24'
         sleep 10
     done
 ) &
+udc_monitor_pid=$!
 
-# This development image grants a shell only through the direct USB link.
-# Keep telnet bound to the USB address, and expose a second shell over ACM.
+# Keep the RAM USB shells if persistent SteamOS validation or hand-over fails.
 telnetd -b 192.168.77.2 -l /bin/sh
+if [ -x /sbin/start-persistent-gui ]; then
+    wait_count=0
+    while [ "$wait_count" -lt 50 ]; do
+        userdata_found=0
+        for block_directory in /sys/class/block/*; do
+            [ -f "$block_directory/partition" ] || continue
+            if [ -f "$block_directory/partlabel" ]; then
+                label=$(cat "$block_directory/partlabel")
+            else
+                label=$(/bin/busybox sed -n 's/^PARTNAME=//p' "$block_directory/uevent")
+            fi
+            if [ "$label" = userdata ]; then
+                userdata_found=1
+                break
+            fi
+        done
+        [ "$userdata_found" -eq 1 ] && break
+        wait_count=$((wait_count + 1))
+        sleep 0.1
+    done
+    if /sbin/start-persistent-gui; then
+        # The outer RAM shell owns USB telnet. Start SteamOS in its own PID and
+        # mount namespaces so a systemd/session failure never removes that shell.
+        ln -sf /dev/null /newroot/etc/systemd/system/tabs7-debug-shell.service
+        ln -sf /dev/null /newroot/etc/systemd/system/persist.mount
+        mkdir -p /newroot/etc/systemd/system/upower.service.d \
+            /newroot/etc/systemd/system/systemd-timesyncd.service.d
+        printf '[Service]\nPrivateUsers=no\n' > /newroot/etc/systemd/system/upower.service.d/namespace.conf
+        printf '[Unit]\nConditionVirtualization=\n' > /newroot/etc/systemd/system/systemd-timesyncd.service.d/namespace.conf
+        mount --bind /sys /newroot/sys
+        setsid /bin/busybox unshare -m -p -f sh -c \
+            'mount -t proc proc /newroot/proc && exec /bin/busybox chroot /newroot /usr/lib/systemd/systemd --unit=graphical.target' \
+            > /run/steamos-namespace.log 2>&1 &
+        echo 'SteamOS graphical target started in a namespace; RAM USB debug remains active' > /dev/kmsg
+    else
+        echo 'SteamOS bootstrap failed; native USB shells remain active' > /dev/kmsg
+    fi
+fi
 while :; do
     setsid sh -c 'exec sh </dev/ttyGS0 >/dev/ttyGS0 2>&1'
     sleep 1

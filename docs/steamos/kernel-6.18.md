@@ -180,27 +180,47 @@ SPMI SID 2/0xa/0xb（pm8150b、pm8009）访问失败 `-5`，暂不影响。
 写入通道：TWRP 内用 `scripts/device/flash-via-recovery.py`；运行中的 4.19 SteamOS 内用
 `scripts/device/push-boot.py`（支持 `--partition dtbo`）。
 
+## 真机 Game Mode 记录（2026-10-25）
+
+**状态：6.18.58 冷启动后自动进入 SteamOS Game Mode；systemd `running`、0 个失败单元，外层 USB/telnet 保持可用。**
+最终候选为 `out/boot-shim/steamos-mainline-final-20261025-02/boot.img`，SHA-256
+`432d5c56c8d7b774e993f1bfbaeb8d5f00602b86bd77d1a641e04bf7a66d1f54`，写入 `/dev/sda22` 后读回一致。
+
+- UFS 的 `PARTNAME=userdata` 找到 `/dev/sda35`，F2FS 双超级块和 UUID 校验通过，持久 SteamOS 可写挂载。
+- `SM_GPUCC_8250` 使 Adreno SMMU/GMU 正常工作，`FW_LOADER` 加载 SQE/GMU；厂商 SQE 0x93 换成
+  linux-firmware 0x112；zap 保持设备原厂分离 `.mdt + .b00/.b01/.b02`，不拼接、不绕过鉴权。
+- `/dev/dri/renderD128` 存在，`vulkaninfo --summary` 报告 `Turnip Adreno (TM) 650`
+  （`0x5143:0x6050002`），GMU firmware v2.1.8。
+- DSI-1 `connected`，模式 1600x2560@120；系统 gamescope 选中 Turnip、DRM modifiers、
+  Wayland/Xwayland 和原生 ARM64 Steam 均实际运行。`tabs7-gamescope-session.service`、
+  `upower.service`、`steamos-manager.service` 均 active。
+- initramfs 保留 BusyBox PID 1 与 telnet，在独立 PID/mount namespace 里以 chroot 启动
+  `graphical.target`。重复 telnet 和不存在的 syspersist 被屏蔽；upower 在此调试 namespace 使用
+  `PrivateUsers=no`，timesyncd 清除 `ConditionVirtualization`。不能用 BusyBox `switch_root`，
+  它会删除外层 RAM root；pivot_root 在该 rootfs 上也不是可用路径。
+- `TRACING/FTRACE/FUNCTION_TRACER` 已启用，steamos-manager 的 tracefs 实例可以创建。
+  NTP 显示 `System clock synchronized: yes`；主机 `tabs7linux-usb` 为 `shared`，平板默认路由
+  为 `192.168.77.1`，`https://store.steampowered.com` 返回 HTTP 200。
+- 临时 `a6xx init`/`mdss init` 阶段日志已全部移除。仓库测试为 `86 passed, 1 skipped`。
+
+未完成的独立验收：触摸、Wi-Fi/蓝牙、Proton fsync、vkd3d-proton sparse、Desktop Mode。
+启动期仍见过显示 SMMU fault 和 DSI command timeout，不能把当前结果描述为所有显示问题已解决。
+
 ## 按顺序的阻塞项
 
 1. ~~**早期调试通道与 USB 线路**~~（已完成）：simpledrm + fbcon 显示 6.18 日志；
    MAX77705 已切到 USB，主机枚举 `1d6b:0104`，telnet shell 可用，见上文。
-2. **initramfs 找到 userdata**（当前；代码已实现，待 6.18 真机验证）。`start-persistent-gui`
-   先读 `/sys/class/block/*/partlabel`（主线的 GPT 名称，需 `CONFIG_EFI_PARTITION=y`），
-   没有该属性时回退到厂商内核的 `uevent PARTNAME`，命中后仍按 F2FS 双超级块 magic 与 UUID
-   校验。4.19 上只验证过回退分支；**partlabel 分支要等 6.18 首次启动才会第一次真正执行**。
-3. **显示**：面板参数、九项差距和工作顺序见[面板与双 VIG](panel-6.18.md)。
-4. **GPU 用户空间**：重建上游 freedreno/Turnip(`msm`) + gamescope 的构建与库布局，
-   `userspace/steamos/gamescope-session` 里的 `TABS7_ZINK_KGSL=1`、`mesa-zink-gnome-x11`
-   前缀都要改写；gamescope 打开 modifier，用 `VK_EXT_physical_device_drm` 匹配 KMS 设备。
-5. **输入与网络**：触摸、Wi-Fi、蓝牙都需要对应的主线驱动与固件路径。
-6. **BOOT 封装**：6.18 `Image` 沿用现有 v2 header/AVB 封装与命令行（`rdinit=`、
-   `androidboot.*`），写入前用 `preflight-steamos-boot.py` 的同类检查确认。
+2. ~~**initramfs 找到 userdata**~~（已完成）：6.18 真机通过 `uevent PARTNAME` 找到
+   `/dev/sda35`，F2FS 双超级块 magic/UUID 和读写挂载已验证。partlabel 分支仍不是本机路径。
+3. ~~**显示与 Game Mode**~~（主线后端已验证）：见[面板与双 VIG](panel-6.18.md) 和上面的记录；
+   仍需单独清理启动期 SMMU/DSI 错误并验证具体平面分配。
+4. ~~**GPU 用户空间**~~（已完成）：系统 freedreno/Turnip(`msm`) 与系统 gamescope 已替代
+   `TABS7_ZINK_KGSL=1`、私有 ICD 和 `mesa-zink-gnome-x11` 的旧会话路径。
+5. **输入与其他网络**：触摸、Wi-Fi、蓝牙都需要对应的主线驱动与固件路径；USB 共享网络已完成。
+6. ~~**BOOT 封装**~~（已完成）：shim + 厂商 DTB + 原 Lineage DTBO/vbmeta，只写 BOOT 并读回校验。
 
-验收标准：gamescope 直驱双 VIG，Steam 能进 Game Mode；Proton 日志里有 fsync，
-vkd3d-proton 能识别 sparse。每一项都必须有真机证据。
-
-在 1–3 项在真机上通过之前，不要把 6.18 产物写成“可启动内核”，也不要覆盖 4.19 的 BOOT。
-4.19 路径（`scripts/build/vendor/`）保留到 6.18 达到同样水平为止。
+剩余验收：Proton 日志里有 fsync，vkd3d-proton 能识别 sparse；触摸、Wi-Fi/蓝牙和
+Desktop Mode 也各有独立的真机验收。4.19 路径（`scripts/build/vendor/`）继续保留作回退。
 
 ## 6.18 BOOT 候选
 

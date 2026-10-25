@@ -366,10 +366,9 @@
  * UFS 内置存储（阶段 B）
  * ---------------------------------------------------------------- */
 &ufs_mem_hc {
-	/* First boot uses only an initramfs; verify supplies before enabling UFS. */
-	status = "disabled";
+	/* Rev7 supplies verified against the live vendor FDT; reset is optional. */
+	status = "okay";
 
-	reset-gpios = <&tlmm 156 GPIO_ACTIVE_LOW>;
 	vcc-supply = <&vreg_l17a_2p5>;
 	vcc-max-microamp = <800000>;
 	vccq-supply = <&vreg_l6a_1p2>;
@@ -379,7 +378,7 @@
 };
 
 &ufs_mem_phy {
-	status = "disabled";
+	status = "okay";
 
 	vdda-phy-supply = <&vreg_l5a_0p88>;
 	vdda-pll-supply = <&vreg_l9a_1p2>;
@@ -723,15 +722,15 @@
 
 /* Adreno 650 GPU + GMU */
 &gpu {
-	status = "disabled";
+	status = "okay";
 
 	zap-shader {
-		firmware-name = "qcom/sm8250/gts7lwifi/a650_zap.mbn";
+		firmware-name = "qcom/sm8250/gts7lwifi/a650_zap.mdt";
 	};
 };
 
 &gmu {
-	status = "disabled";
+	status = "okay";
 };
 
 /* ----------------------------------------------------------------

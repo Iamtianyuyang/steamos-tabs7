@@ -22,7 +22,15 @@ if [[ ! -f "$busybox" ]]; then busybox="$workdir/package/bin/busybox"; fi
 cp "$busybox" "$rootfs/bin/busybox"
 chmod 755 "$rootfs/bin/busybox"
 cp "$project_root/boot/initramfs/init" "$rootfs/init"
-chmod 755 "$rootfs/init"
+cp "$project_root/boot/initramfs/start-persistent-gui" "$rootfs/sbin/start-persistent-gui"
+chmod 755 "$rootfs/init" "$rootfs/sbin/start-persistent-gui"
+firmware="$project_root/out/firmware/gts7lwifi"
+for name in a650_sqe.fw a650_gmu.bin a650_zap.mdt a650_zap.b00 a650_zap.b01 a650_zap.b02; do
+    [[ -f "$firmware/$name" ]] || { echo "Missing GPU firmware: $firmware/$name" >&2; exit 1; }
+done
+mkdir -p "$rootfs/lib/firmware/qcom/sm8250/gts7lwifi"
+cp "$firmware/a650_sqe.fw" "$firmware/a650_gmu.bin" "$rootfs/lib/firmware/qcom/"
+cp "$firmware/a650_zap.mdt" "$firmware/a650_zap.b00" "$firmware/a650_zap.b01" "$firmware/a650_zap.b02" "$rootfs/lib/firmware/qcom/sm8250/gts7lwifi/"
 for applet in sh mount mkdir echo sleep ls head tail grep ln readlink ifconfig telnetd setsid dmesg cat ip i2cget i2cset i2ctransfer reboot poweroff; do
     ln -s busybox "$rootfs/bin/$applet"
 done
