@@ -174,23 +174,39 @@ src/service.c:btd_service_connect() a2dp-sink profile connect failed ...: Protoc
 这也解释了为什么前面那些内核配置补齐只改变了周边行为（IRK 生成、HID/LE 可用），
 却没有改变 A2DP 的错误。
 
-### 下一步属于 SteamOS 用户空间
+### 根因：BlueZ 没有任何本地 A2DP 端点
 
-1. 查这个 BlueZ 5.79 构建里 A2DP 端点是否注册成功：启动日志目前只有
-   `does not support csip/asha plugin` 之类的信息，需要确认 SBC/AAC 编解码插件
-   有没有编进 `bluetoothd`（`profiles/audio/*`）。
-2. 对照同一个镜像在 **vendor 4.19** 上的行为：如果那边能连 A2DP，问题就在
-   这个 BlueZ 构建与主线内核的无 `ENOPROTOOPT` 无关；如果那边也不行，就说明是
-   镜像本身的 BlueZ 缺插件。
-3. 若确认缺插件，属于 SteamOS 适配层（换/重编 BlueZ，或补 codec 依赖），
-   不再是 `steamos-bluetooth-6.18.config` 或设备树的问题。
+继续往用户空间查，证据链如下（`out/wifi-6.18/`）：
 
-证据：`out/wifi-6.18/bootE-bt-strace.txt`、`bootE-bt-strace2.txt`、
-`bootE-bt-sockopts.txt`（socket 选项探针）、`bootE-bt-btmon.txt`（btmon 可用，
-但失败发生在 HCI 之前所以抓不到命令）、`bootE-bt-connect.txt`。
+| 检查 | 结果 |
+| --- | --- |
+| `bluetoothd -d` 日志里 Endpoint 相关行 | **0 条**；只有 `media_server_probe() path /org/bluez/hci0`（Media1 服务端已就绪，等人注册端点） |
+| strace 中的失败 syscall | 无（`grep '= -1'` 为空），socket/选项全部成功，trace 停在 `connect()` 之前 |
+| SPA 蓝牙插件 | 存在：`/usr/lib/spa-0.2/bluez5/libspa-bluez5.so` + `codec-bluez5-{aac,aptx,...}.so` |
+| WirePlumber | 0.5.18、PipeWire 1.6.8 在跑（`wpctl status` 可见 gamescope/Steam 客户端、`Built-in Audio`） |
+| WirePlumber 蓝牙脚本 | `/usr/share/wireplumber/scripts/monitors/bluez/` 齐全；`/etc/wireplumber/wireplumber.conf.d/20-bluetooth.conf` 只禁了 `monitor.bluez-midi` |
+| WirePlumber 日志 | 只有 libcamera 插件警告，没有任何 bluez 报错 |
+
+结论：`org.bluez.Media1.RegisterEndpoint` 从未被调用，所以 A2DP profile
+没有本地 SEP 可用，`a2dp_sink_connect()` 立刻返回 `ENOPROTOOPT`——这正是我们
+看到的 `Protocol not available`。**内核、设备树、固件在这条链上都已经没问题**，
+缺的是 PipeWire/WirePlumber 没有把 A2DP 端点注册给 BlueZ。
+
+### 下一步（都是 SteamOS 用户空间）
+
+1. 让 WirePlumber 真正加载 bluez 监视器并注册端点：
+   在 `/etc/wireplumber/wireplumber.conf.d/` 里显式 `monitor.bluez = enabled`
+   （profile 名以 `wpctl status` 的显示为准），重启 `wireplumber` 后确认
+   `bluetoothd -d` 出现 `endpoint registered` 之类的日志。
+2. 若仍不注册，查 `libspa-bluez5.so` 的依赖闭包（它是 1.6.8 的插件，需与
+   PipeWire 版本严格匹配）以及 WP 是否有 `api.bluez5` 加载失败（把
+   `wireplumber` 的日志级别调成 debug）。
+3. 对照 vendor 4.19 镜像：那边若能用 A2DP，说明这个 SteamOS 镜像的 WP 配置与
+   主线无关；若那边也不行，就是镜像本身的 WP/BlueZ 组合问题。
 
 ### 仍未做
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
   当前用的是本地管理地址 `02:00:00:00:5A:AD`。
-- A2DP/HFP 连通（卡在 BlueZ 用户空间，见上）。
+- A2DP/HFP 连通：卡在 WirePlumber 端点注册，见上。
+
