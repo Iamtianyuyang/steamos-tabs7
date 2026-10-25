@@ -48,16 +48,22 @@
 		serial0 = &uart6;
 	};
 
+	/*
+	 * Vendor input_gts7l_common.dtsi: volume up is PM8150L GPIO3, active
+	 * low with a pull-up; volume down is the PON RESIN and power the PON
+	 * KPDPWR line (pm8150.dtsi qcom,pon_1/pon_2).
+	 */
 	gpio-keys {
 		compatible = "gpio-keys";
-		/* GPIO assignment still needs confirmation from the live DTB. */
-		status = "disabled";
+		pinctrl-names = "default";
+		pinctrl-0 = <&key_vol_up_default>;
 
-		key-volume-down {
-			label = "Volume Down";
+		key-volume-up {
+			label = "Volume Up";
 			gpios = <&pm8150l_gpios 3 GPIO_ACTIVE_LOW>;
-			linux,code = <KEY_VOLUMEDOWN>;
+			linux,code = <KEY_VOLUMEUP>;
 			debounce-interval = <15>;
+			wakeup-source;
 		};
 	};
 
@@ -439,6 +445,17 @@
 &pon_resin {
 	status = "okay";
 	linux,code = <KEY_VOLUMEDOWN>;
+};
+
+&pm8150l_gpios {
+	/* Vendor key_vol_up_default: normal input, pull-up, power-source 0. */
+	key_vol_up_default: key-vol-up-default-state {
+		pins = "gpio3";
+		function = "normal";
+		input-enable;
+		bias-pull-up;
+		power-source = <0>;
+	};
 };
 
 /* ----------------------------------------------------------------

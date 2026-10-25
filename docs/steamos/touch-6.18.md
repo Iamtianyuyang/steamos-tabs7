@@ -46,5 +46,11 @@ BOOT `f3ef5daa676fd9c73698ae1e57967969fdb3ab0a0069103dd3660c9ac6d71f7a`
 以 SIGKILL 结束旧 gamescope，由单元的 `Restart=on-failure` 重新拉起；新进程命令行含
 该参数。用户确认单击触发、滑动可滚动，触屏逻辑 **正常**；TLMM15 中断累计 904 次。
 
-原始记录在 `out/display-recovery/20261025/touch2/`（含 `touch-mode-passthrough.txt`）。仍待：多指、四角与边缘坐标、
-Steam 内长时间操作、DPMS 关 / 开及锁屏后的触摸恢复、屏幕键盘与输入。
+原始记录在 `out/display-recovery/20261025/touch2/`（含 `touch-mode-passthrough.txt`）。仍待（2026-10-25 用户决定暂缓，先做物理按键）：
+
+- 多指手势；
+- 四角与边缘坐标；
+- Steam 内长时间操作；
+- DPMS 关 / 开及锁屏后的触摸恢复（面板跟随的下电 / 上电路径尚未在真机上走过）；
+- 屏幕键盘与文字输入；
+- 重复冷启动。

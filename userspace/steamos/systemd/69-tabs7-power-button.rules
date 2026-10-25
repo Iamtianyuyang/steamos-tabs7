@@ -1,0 +1,4 @@
+# The PMIC power key is the SteamOS power button: steamos-powerbuttond only
+# opens input devices carrying this property (and 70-steamos-power-button.rules
+# then grants the seat access to them).
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="pm8941_pwrkey", ENV{STEAMOS_POWER_BUTTON}="1"

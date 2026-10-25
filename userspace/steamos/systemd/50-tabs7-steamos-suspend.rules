@@ -1,0 +1,12 @@
+// The Game Mode unit runs as a logind "background" session without a seat
+// (seatd hands out DRM and input), so login1's allow_active never applies and
+// Steam's suspend fails with InteractiveAuthorizationRequired, leaving its
+// faded-out black screen up. Grant the session user suspend only; power-off
+// and reboot from the PID-namespace systemd are not validated yet.
+polkit.addRule(function(action, subject) {
+    if (subject.user == "steamos" &&
+        (action.id == "org.freedesktop.login1.suspend" ||
+         action.id == "org.freedesktop.login1.suspend-multiple-sessions")) {
+        return polkit.Result.YES;
+    }
+});

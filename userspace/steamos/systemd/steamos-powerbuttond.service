@@ -1,0 +1,14 @@
+# User unit override for /usr/lib/systemd/user/steamos-powerbuttond.service.
+# This image is the Steam Frame variant: its unit is Requisite=steamvr.service
+# and refuses to run unless vrdevice_path reports a Frame. Dependencies cannot
+# be removed by a drop-in, so the whole unit is replaced, keeping its command.
+[Unit]
+Description=Power Button daemon for SteamOS (SM-T870)
+
+[Service]
+ExecStart=/usr/lib/hwsupport/steamos-powerbuttond
+Restart=on-failure
+Slice=session.slice
+
+[Install]
+WantedBy=default.target

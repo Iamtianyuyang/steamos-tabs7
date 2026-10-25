@@ -107,6 +107,13 @@ class AdaptationTests(unittest.TestCase):
         self.assertTrue((self.root / 'etc/systemd/system/graphical.target.wants/tabs7-gamescope-session.service').is_symlink())
         self.assertEqual((self.root / 'usr/lib/firmware/a650_sqe.fw').read_bytes(), b'a650_sqe.fw')
         self.assertTrue(os.access(self.root / 'usr/local/lib/tabs7linux/steamos/gamescope-session', os.X_OK))
+        # Power button: tagged for steamos-powerbuttond, which runs in the user session.
+        self.assertIn('ENV{STEAMOS_POWER_BUTTON}="1"',
+                      (self.root / 'etc/udev/rules.d/69-tabs7-power-button.rules').read_text())
+        self.assertIn('org.freedesktop.login1.suspend',
+                      (self.root / 'etc/polkit-1/rules.d/50-tabs7-steamos-suspend.rules').read_text())
+        self.assertEqual(os.readlink(self.root / 'etc/systemd/user/default.target.wants/steamos-powerbuttond.service'),
+                         '/etc/systemd/user/steamos-powerbuttond.service')
         self.assertEqual((self.root / 'usr/local/lib/tabs7linux/steamos/os-release').read_text(),
                          'NAME="SteamOS"\nID=steamos\n')
         adaptation.uninstall(adaptation.Tree(self.root))
@@ -123,3 +130,28 @@ class AdaptationTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PowerButtonTest(unittest.TestCase):
+    def test_rule_matches_the_kernel_power_key(self):
+        driver = (ROOT / 'linux-sm8250-v6.18/drivers/input/misc/pm8941-pwrkey.c').read_text()
+        rule = (adaptation.SOURCE / '69-tabs7-power-button.rules').read_text()
+        name = re.search(r'ATTRS\{name\}=="([^"]+)"', rule).group(1)
+        self.assertIn(f'"{name}"', driver)
+        # Must be set before 70-steamos-power-button.rules grants seat access.
+        self.assertLess('69-tabs7-power-button.rules', '70-steamos-power-button.rules')
+
+    def test_powerbuttond_override_drops_the_frame_gates(self):
+        unit = (adaptation.SOURCE / 'steamos-powerbuttond.service').read_text()
+        directives = [line.split('=')[0] for line in unit.splitlines() if '=' in line and not line.startswith('#')]
+        self.assertNotIn('Requisite', directives)
+        self.assertNotIn('ExecCondition', directives)
+        self.assertIn('ExecStart=/usr/lib/hwsupport/steamos-powerbuttond', unit)
+        self.assertIn('WantedBy=default.target', unit)
+
+    def test_polkit_grants_only_suspend(self):
+        rule = (adaptation.SOURCE / '50-tabs7-steamos-suspend.rules').read_text()
+        actions = set(re.findall(r'"(org\.freedesktop\.login1\.[a-z-]+)"', rule))
+        self.assertEqual(actions, {'org.freedesktop.login1.suspend',
+                                   'org.freedesktop.login1.suspend-multiple-sessions'})
+        self.assertIn('subject.user == "steamos"', rule)

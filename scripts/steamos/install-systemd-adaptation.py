@@ -161,6 +161,14 @@ def install(tree, busybox, game_mode=None):
         for name, data in game_mode.items():
             tree.write('usr/lib/firmware/' + name, data)
         tree.write('etc/udev/rules.d/70-tabs7-kgsl.rules', (SOURCE / '70-tabs7-kgsl.rules').read_bytes())
+        tree.write('etc/udev/rules.d/69-tabs7-power-button.rules',
+                   (SOURCE / '69-tabs7-power-button.rules').read_bytes())
+        tree.write('etc/polkit-1/rules.d/50-tabs7-steamos-suspend.rules',
+                   (SOURCE / '50-tabs7-steamos-suspend.rules').read_bytes())
+        tree.write('etc/systemd/user/steamos-powerbuttond.service',
+                   (SOURCE / 'steamos-powerbuttond.service').read_bytes())
+        tree.link('etc/systemd/user/default.target.wants/steamos-powerbuttond.service',
+                  '/etc/systemd/user/steamos-powerbuttond.service')
         tree.write('etc/systemd/system/seatd.service.d/50-tabs7-novt.conf',
                    (SOURCE / '50-tabs7-seatd-novt.conf').read_bytes())
         tree.write('etc/tabs7linux/sm-t870-split', SPLIT_PLANES.encode() + b'\n')
