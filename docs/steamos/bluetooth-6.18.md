@@ -256,9 +256,29 @@ agent` 拒绝，`bluetoothctl trust` 之后连接成功。
 `bt-tablet-to-host.txt`、`bt-connect-attempt.txt`、`bt-after-seat-fix.txt`、
 `bt-repo-config-deploy.txt`。
 
+### 耳机出声验证
+
+用户连上耳机后没有声音，原因不是蓝牙链路，而是**默认输出被占**：之前用主机做
+对端测试时，平板把 `tianyy-L16`（本机）设成了默认 sink，声音都送到工作站去了。
+断开主机后 WirePlumber 立刻把默认 sink 切到耳机：
+
+```text
+Sinks:
+  * 74. OPPO Enco Free4    [vol: 1.00]     # 默认
+    58. Built-in Audio Playback
+```
+
+随后用 `pw-play /usr/share/sounds/alsa/Front_Center.wav` 实测，流的
+`node.name` 指向 `bluez_output.88_92_CC_E5_1D_AE.1`，`api.bluez5.profile` 为
+`a2dp-sink`、`api.bluez5.codec` 为 **aac**，流在 `wpctl status` 的 Streams 里
+可见。也就是说 A2DP 数据通路已经打通到耳机。
+
+这轮排查里唯一"非代码"的坑值得记下：客户端把默认 sink 抢走后，桌面与 Steam
+的声音都会跟着去那台设备，看起来就像"连上了但没声音"。
+
 ### 仍未做
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
   当前用的是本地管理地址 `02:00:00:00:5A:AD`。
-- 实际音频播放（主机推流到平板出声）没有单独验收，只验证了端点、连接与节点；
-  用户的耳机/手机现在应该可以从桌面正常连接，需要用户侧确认。
+- Steam/Game Mode 内的音频设备选择没有单独验收（目前依赖 PipeWire 的默认
+  sink），建议用耳机放一次游戏内声音确认。
