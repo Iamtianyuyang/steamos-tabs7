@@ -44,6 +44,11 @@ cp "$adsp"/adsp.mdt "$adsp"/adsp.b[0-9][0-9] "$rootfs/lib/firmware/qcom/sm8250/g
 ath11k="$project_root/out/firmware/ath11k"
 (cd "$ath11k" && sha256sum --quiet -c SHA256SUMS) ||
     { echo "ath11k firmware missing or changed: $ath11k" >&2; exit 1; }
+# cfg80211 needs the signed regulatory database built from wireless-regdb.
+for name in regulatory.db regulatory.db.p7s; do
+    [[ -f "$ath11k/$name" ]] || { echo "Missing $ath11k/$name" >&2; exit 1; }
+done
+cp "$ath11k"/regulatory.db "$ath11k"/regulatory.db.p7s "$rootfs/lib/firmware/"
 mkdir -p "$rootfs/lib/firmware/ath11k/QCA6390/hw2.0"
 cp "$ath11k"/QCA6390/hw2.0/amss.bin "$ath11k"/QCA6390/hw2.0/m3.bin \
    "$ath11k"/QCA6390/hw2.0/board-2.bin "$rootfs/lib/firmware/ath11k/QCA6390/hw2.0/"

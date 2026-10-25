@@ -185,11 +185,56 @@ GUI 命名空间的 D-Bus（`Could not connect`），而 GUI 那边的 NetworkMa
 vendor 时期那套私有构建，尚未在主线路径上验证。`rfkill0`（`phy0`）读出来是
 `state 0` 但 `soft 1`，用 `ip link set wlan0 up` 可以拉起接口，扫描正常。
 
+## 阶段 3：userspace 路径（NetworkManager 可用，可扫描）
+
+`nmcli` 一开始把 `wlan0` 显示成 `unavailable`，日志里是
+`Couldn't initialize supplicant interface: ... wpa_supplicant couldn't grab this
+interface.`，重试五次后放弃。supplicant 自己的日志给出了根因：
+
+```text
+wpa_supplicant: l2_packet_init: socket(PF_PACKET): Address family not supported by protocol
+```
+
+也就是内核没有 `CONFIG_PACKET`：`allnoconfig` 不会替我们打开它，而
+wpa_supplicant 的 EAPOL l2 socket 必须用 `AF_PACKET`。片段已补
+`CONFIG_PACKET=y`。同一轮还发现 `cfg80211: failed to load regulatory.db`：
+`regulatory.db` 属于 **wireless-regdb**，不在 linux-firmware 里，现按签名文件
+`regulatory.db` + `regulatory.db.p7s`（SHA-256
+`0a4abd7ae20d07bb70642937ccb2293a72a6504730eea45a698882599f586368` /
+`bcd81aed039ea6b9b6f3726fbf26911a0caf4a5d894210e0fa2effb384d6b326`）一并放进
+initramfs，因为 `CONFIG_CFG80211_REQUIRE_SIGNED_REGDB=y`。
+
+顺带把 `CONFIG_MAGIC_SYSRQ=y` 加进 `steamos-6.18.config`：initramfs 里 BusyBox
+的 `reboot` 不生效，之前只能靠 `reboot -f`。
+
+### 真机结果
+
+候选 BOOT `out/steamos-kernel-6.18/wifi-nm/boot.img`（SHA-256
+`e720088753d2727b67ea87c6a17785deab70f0538d9129b41cda541cdd8a3cb4`），内核
+`Image` `b3b6866e3fff6b6e2bffbf9b5bbce316931ed5d32fbebf70c5dbc99d601eef93`。
+
+| 观察 | 证据 |
+| --- | --- |
+| regulatory.db 加载 | `cfg80211: Loading compiled-in X.509 certificates`，不再出现 `failed to load regulatory.db` |
+| supplicant 抓起接口 | `wpa_supplicant` 常驻（PID 719），日志里不再有 `l2_packet_init` 失败 |
+| NetworkManager 可用 | `nmcli device status`：`wlan0 wifi disconnected`、`p2p-dev-wlan0 wifi-p2p disconnected` |
+| NM 扫描 | `nmcli dev wifi list` 列出真实 AP：5 GHz 信道 157、WPA2/802.1X、信号 100 等 |
+
+与 init 命名空间里的 `nmcli` 连不上 D-Bus 不同，这里是通过
+`nsenter -t <NetworkManager pid> -m -p -r -w -- nmcli ...` 进入 GUI 会话的
+命名空间执行的；`iw`/`nmcli` 只能在那个命名空间里读到 system D-Bus。
+
+### 仍未验证：关联与 DHCP
+
+NM 现在处于可用状态，但**还没有关联过任何 AP**：这台设备没有保存的连接
+配置（`/etc/NetworkManager/system-connections/` 不存在），而关联需要
+WPA2 口令。扫描结果里出现的 `UPC` 是开放网络，但未经确认不该擅自连别人的 AP。
+所以「关联、DHCP、桌面 Wi-Fi 图标」这三项保持未验收。
+
 ## 下一步（未做）
 
-1. 关联与 DHCP：在主线路径上验证 NetworkManager（或 `wpa_supplicant`）能扫描、
-   关联并拿到地址；vendor 那套零 gateway 路由补丁在 6.18 上不需要，但要确认
-   保存的 keyfile 能直接被用上。
+1. 关联与 DHCP：`nmcli dev wifi connect <ssid> password <psk>`（或桌面 UI）走一次，
+   确认关联、DHCP、路由；vendor 那套零 gateway 路由补丁在 6.18 上不需要。
 2. 蓝牙：先解决 `bt-enable-gpios` 到底是 TLMM 76 还是 21 的冲突，再走 `hci_qca`。
 3. 监管域与省电：`ath11k` 的 `regdb.bin`（本机 vendor 分区里有，19,348 字节）
    目前没提供，扫描工作正常，若后续出现监管域告警再补。

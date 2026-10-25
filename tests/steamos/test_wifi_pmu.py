@@ -194,6 +194,7 @@ def test_config_fragment_asks_for_the_driver_stack():
                    'CONFIG_POWER_SEQUENCING_QCOM_WCN', 'CONFIG_WLAN',
                    'CONFIG_WLAN_VENDOR_ATH', 'CONFIG_CFG80211', 'CONFIG_MAC80211',
                    'CONFIG_ATH11K', 'CONFIG_ATH11K_PCI', 'CONFIG_RFKILL',
+                   'CONFIG_PACKET',
                    'CONFIG_FW_LOADER'):
         assert re.search(rf'^{symbol}=y$', text, re.M), symbol
 
@@ -218,7 +219,8 @@ def test_initramfs_ships_the_ath11k_firmware():
     script = INITRAMFS.read_text()
     assert 'out/firmware/ath11k' in script
     assert 'sha256sum --quiet -c SHA256SUMS' in script
-    for name in ('amss.bin', 'm3.bin', 'board-2.bin'):
+    for name in ('amss.bin', 'm3.bin', 'board-2.bin',
+                 'regulatory.db', 'regulatory.db.p7s'):
         assert name in script, name
     assert 'lib/firmware/ath11k/QCA6390/hw2.0' in script
 
