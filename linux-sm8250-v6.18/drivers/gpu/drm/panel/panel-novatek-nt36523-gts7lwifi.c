@@ -3,7 +3,7 @@
  * Novatek NT36523 WQXGA dual-DSI panel driver
  *
  * Target panel: Samsung Galaxy Tab S7 (gts7lwifi), NT36523 PPA957DB1
- *   2560x1600, video mode, dual-DSI, 4 lanes per DSI
+ *   2560x1600, video mode, dual-DSI, 3 C-PHY trios per DSI
  *
  * The init sequence, timings and reset delays live in the generated header
  * panel-novatek-nt36523-gts7lwifi.h, produced by scripts/steamos/emit-panel-seq.py
@@ -66,6 +66,7 @@ struct nt36523 {
 	unsigned int esd_recoveries;
 
 	bool prepared;
+	bool enabled;
 };
 
 static inline struct nt36523 *to_nt36523(struct drm_panel *panel)
@@ -76,17 +77,20 @@ static inline struct nt36523 *to_nt36523(struct drm_panel *panel)
 static int nt36523_send_init_sequence(struct nt36523 *ctx)
 {
 	const struct nt36523_init_cmd *cmd;
-	unsigned int index;
+	unsigned int index, link;
 	int ret;
 
 	for (index = 0; index < ctx->desc->num_init; index++) {
 		cmd = &ctx->desc->init[index];
 
-		/* payload[0] is the DCS command, the rest is its data */
-		ret = mipi_dsi_dcs_write_buffer(ctx->dsi[0], cmd->payload, cmd->len);
-		if (ret < 0) {
-			dev_err(ctx->panel.dev, "init command %u failed: %d\n", index, ret);
-			return ret;
+		/* Bonding video does not broadcast commands to the second DDIC. */
+		for (link = 0; link < ARRAY_SIZE(ctx->dsi); link++) {
+			ret = mipi_dsi_dcs_write_buffer(ctx->dsi[link], cmd->payload, cmd->len);
+			if (ret < 0) {
+				dev_err(ctx->panel.dev, "DSI%u init command %u failed: %d\n",
+					link, index, ret);
+				return ret;
+			}
 		}
 
 		if (cmd->delay_ms)
@@ -126,16 +130,17 @@ static int nt36523_power_on(struct nt36523 *ctx)
 	msleep(10);
 
 	/*
-	 * Vendor reset sequence: <0 12>, <1 12>, <0 12>, <1 12> in ms, taken from
-	 * qcom,mdss-dsi-reset-sequence.
+	 * Vendor reset sequence uses physical levels: low, high, low, high,
+	 * each held for 12 ms. The active-low GPIO descriptor takes logical
+	 * reset states, so assert with 1 and release with 0.
 	 */
-	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-	msleep(PPA957DB1_RESET_DELAY_MS);
 	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 	msleep(PPA957DB1_RESET_DELAY_MS);
 	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
 	msleep(PPA957DB1_RESET_DELAY_MS);
 	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+	msleep(PPA957DB1_RESET_DELAY_MS);
+	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
 	msleep(PPA957DB1_RESET_DELAY_MS);
 
 	return 0;
@@ -143,7 +148,7 @@ static int nt36523_power_on(struct nt36523 *ctx)
 
 static int nt36523_power_off(struct nt36523 *ctx)
 {
-	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
+	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 
 	/* 10 ms discharge time from qcom,panel-supply-entry@1 */
 	regulator_disable(ctx->buck);
@@ -155,6 +160,7 @@ static int nt36523_power_off(struct nt36523 *ctx)
 static int nt36523_prepare(struct drm_panel *panel)
 {
 	struct nt36523 *ctx = to_nt36523(panel);
+	unsigned int link;
 	int ret;
 
 	mutex_lock(&ctx->lock);
@@ -173,16 +179,22 @@ static int nt36523_prepare(struct drm_panel *panel)
 	ctx->dsi[1]->mode_flags |= MIPI_DSI_MODE_LPM;
 
 	/*
-	 * The vendor sequence already contains sleep-out (0x11) and display-on
-	 * (0x29) with their waits, so replay it verbatim instead of adding them.
+	 * The sequence contains sleep-out (0x11). The vendor driver sends
+	 * display-on (0x29) separately after the initialization sequence.
 	 */
 	ret = nt36523_send_init_sequence(ctx);
 	if (ret < 0)
 		goto err;
 
+	for (link = 0; link < ARRAY_SIZE(ctx->dsi); link++) {
+		ret = mipi_dsi_dcs_set_display_on(ctx->dsi[link]);
+		if (ret < 0)
+			goto err;
+	}
+
 	msleep(20);
 
-	ctx->prepared = true;
+	WRITE_ONCE(ctx->prepared, true);
 	mutex_unlock(&ctx->lock);
 	return 0;
 
@@ -195,6 +207,7 @@ err:
 static int nt36523_unprepare(struct drm_panel *panel)
 {
 	struct nt36523 *ctx = to_nt36523(panel);
+	unsigned int link;
 
 	cancel_work_sync(&ctx->esd_work);
 	mutex_lock(&ctx->lock);
@@ -202,19 +215,39 @@ static int nt36523_unprepare(struct drm_panel *panel)
 		mutex_unlock(&ctx->lock);
 		return 0;
 	}
+	WRITE_ONCE(ctx->prepared, false);
 
 	ctx->dsi[0]->mode_flags &= ~MIPI_DSI_MODE_LPM;
 	ctx->dsi[1]->mode_flags &= ~MIPI_DSI_MODE_LPM;
 
-	mipi_dsi_dcs_set_display_off(ctx->dsi[0]);
+	for (link = 0; link < ARRAY_SIZE(ctx->dsi); link++)
+		mipi_dsi_dcs_set_display_off(ctx->dsi[link]);
 	msleep(120);
-	mipi_dsi_dcs_enter_sleep_mode(ctx->dsi[0]);
+	for (link = 0; link < ARRAY_SIZE(ctx->dsi); link++)
+		mipi_dsi_dcs_enter_sleep_mode(ctx->dsi[link]);
 	msleep(60);
 
 	nt36523_power_off(ctx);
 
-	ctx->prepared = false;
 	mutex_unlock(&ctx->lock);
+	return 0;
+}
+
+static int nt36523_enable(struct drm_panel *panel)
+{
+	struct nt36523 *ctx = to_nt36523(panel);
+
+	/* The video path is ready; reset/init edges are not panel faults. */
+	WRITE_ONCE(ctx->enabled, true);
+	return 0;
+}
+
+static int nt36523_disable(struct drm_panel *panel)
+{
+	struct nt36523 *ctx = to_nt36523(panel);
+
+	WRITE_ONCE(ctx->enabled, false);
+	cancel_work_sync(&ctx->esd_work);
 	return 0;
 }
 
@@ -239,6 +272,8 @@ static int nt36523_get_modes(struct drm_panel *panel,
 
 static const struct drm_panel_funcs nt36523_funcs = {
 	.prepare	= nt36523_prepare,
+	.enable		= nt36523_enable,
+	.disable	= nt36523_disable,
 	.unprepare	= nt36523_unprepare,
 	.get_modes	= nt36523_get_modes,
 };
@@ -247,34 +282,48 @@ static const struct drm_panel_funcs nt36523_funcs = {
  * ESD handling, from the downstream panel node:
  *   samsung,esd-irq-gpio1 = <&tlmm 66 0>  (qcom,...,irq-trigger1 = "rising")
  *   samsung,ub-con-det    = <&tlmm 46 0>
- * Both are pull-less inputs: a rising edge means the panel lost its state, so
- * the only recovery the vendor performs is power cycle plus init replay.
+ * The downstream driver masks ESD IRQs during reset/init. Here transitions
+ * outside the enabled/prepared state and during recovery must be ignored.
  */
 static void nt36523_esd_work(struct work_struct *work)
 {
 	struct nt36523 *ctx = container_of(work, struct nt36523, esd_work);
+	unsigned int link;
 	int ret;
 
 	mutex_lock(&ctx->lock);
-	if (!ctx->prepared) {
+	if (!ctx->prepared || !READ_ONCE(ctx->enabled)) {
 		mutex_unlock(&ctx->lock);
 		return;
 	}
 
 	dev_warn(ctx->panel.dev, "ESD detected, recovering\n");
 
+	/* Ignore the edges caused by our own power/reset sequence. */
+	WRITE_ONCE(ctx->prepared, false);
 	nt36523_power_off(ctx);
 	ret = nt36523_power_on(ctx);
-	if (!ret)
-		ret = nt36523_send_init_sequence(ctx);
+	if (ret)
+		goto out;
+	ret = nt36523_send_init_sequence(ctx);
+	for (link = 0; !ret && link < ARRAY_SIZE(ctx->dsi); link++)
+		ret = mipi_dsi_dcs_set_display_on(ctx->dsi[link]);
+	if (!ret) {
+		msleep(20);
+		/* Init writes brightness zero; recover the user's current level. */
+		ret = backlight_update_status(ctx->backlight);
+	}
 	if (ret) {
-		dev_err(ctx->panel.dev, "ESD recovery failed: %d\n", ret);
-		ctx->prepared = false;
+		nt36523_power_off(ctx);
 	} else {
+		WRITE_ONCE(ctx->prepared, true);
 		ctx->esd_recoveries++;
 		dev_info(ctx->panel.dev, "ESD recovery %u complete\n", ctx->esd_recoveries);
 	}
 
+out:
+	if (ret)
+		dev_err(ctx->panel.dev, "ESD recovery failed: %d\n", ret);
 	mutex_unlock(&ctx->lock);
 }
 
@@ -282,7 +331,8 @@ static irqreturn_t nt36523_esd_irq(int irq, void *data)
 {
 	struct nt36523 *ctx = data;
 
-	schedule_work(&ctx->esd_work);
+	if (READ_ONCE(ctx->prepared) && READ_ONCE(ctx->enabled))
+		schedule_work(&ctx->esd_work);
 
 	return IRQ_HANDLED;
 }
@@ -309,15 +359,23 @@ static int nt36523_request_esd_irq(struct nt36523 *ctx, struct gpio_desc *gpio,
 }
 
 /*
- * Brightness uses the vendor DCS path: long write 0x51 with two data bytes,
+ * Brightness uses the vendor DCS path: long write 0x51, high byte first,
  * levels 4..462 (qcom,mdss-dsi-bl-min-level / -max-level). The panel profile in
  * hardware/samsung/gts7lwifi/panel/ carries the same numbers.
  */
 static int nt36523_bl_update_status(struct backlight_device *bl)
 {
 	struct nt36523 *ctx = bl_get_data(bl);
+	unsigned int link;
+	int ret;
 
-	return mipi_dsi_dcs_set_display_brightness(ctx->dsi[0], bl->props.brightness);
+	for (link = 0; link < ARRAY_SIZE(ctx->dsi); link++) {
+		ret = mipi_dsi_dcs_set_display_brightness_large(ctx->dsi[link],
+							    backlight_get_brightness(bl));
+		if (ret < 0)
+			return ret;
+	}
+	return 0;
 }
 
 static const struct backlight_ops nt36523_bl_ops = {
@@ -405,7 +463,7 @@ static int nt36523_probe(struct mipi_dsi_device *dsi)
 		goto err_unreg;
 	}
 
-	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
+	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(ctx->reset_gpio)) {
 		ret = dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
 				    "failed to get reset gpio\n");
@@ -435,6 +493,7 @@ static int nt36523_probe(struct mipi_dsi_device *dsi)
 				    "failed to register backlight\n");
 		goto err_unreg;
 	}
+	ctx->panel.backlight = ctx->backlight;
 
 	ret = nt36523_request_esd_irq(ctx, ctx->esd_gpio, "esd");
 	if (ret)
@@ -478,6 +537,7 @@ static void nt36523_remove(struct mipi_dsi_device *dsi)
 {
 	struct nt36523 *ctx = mipi_dsi_get_drvdata(dsi);
 
+	WRITE_ONCE(ctx->enabled, false);
 	cancel_work_sync(&ctx->esd_work);
 	mutex_destroy(&ctx->lock);
 
@@ -495,6 +555,7 @@ static void nt36523_shutdown(struct mipi_dsi_device *dsi)
 {
 	struct nt36523 *ctx = mipi_dsi_get_drvdata(dsi);
 
+	drm_panel_disable(&ctx->panel);
 	drm_panel_unprepare(&ctx->panel);
 }
 

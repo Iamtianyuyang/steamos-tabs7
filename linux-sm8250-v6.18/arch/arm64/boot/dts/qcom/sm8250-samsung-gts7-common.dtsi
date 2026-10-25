@@ -572,8 +572,9 @@
 
 	/*
 	 * The panel is driven by both links (vendor topology <2 0 2>), so the
-	 * controllers are bonded: msm halves the horizontal timings per link and
-	 * sends each DCS command to both. dsi0 is the master link and clocks dsi1.
+	 * controllers are bonded: msm halves the horizontal timings per link.
+	 * The panel driver sends commands to both DDICs explicitly; bonding alone
+	 * does not broadcast them. dsi0 is the master link and clocks dsi1.
 	 */
 	qcom,dual-dsi-mode;
 	qcom,master-dsi;

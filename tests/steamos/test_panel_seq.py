@@ -135,7 +135,8 @@ class GeneratedHeaderTest(unittest.TestCase):
         work = work[:work.index('\n}\n')]
         self.assertLess(work.index('nt36523_power_off(ctx)'), work.index('nt36523_power_on(ctx)'))
         self.assertIn('nt36523_send_init_sequence(ctx)', work)
-        self.assertIn('if (!ctx->prepared)', work, 'recover only while the panel is on')
+        self.assertIn('!ctx->prepared', work, 'recover only while the panel is prepared')
+        self.assertIn('!READ_ONCE(ctx->enabled)', work, 'recover only after video enable')
 
     def test_display_pipeline_is_enabled_in_the_board_dts(self):
         dts = (KERNEL / 'arch/arm64/boot/dts/qcom/sm8250-samsung-gts7-common.dtsi').read_text()
@@ -164,13 +165,15 @@ class GeneratedHeaderTest(unittest.TestCase):
         self.assertIn('hardware_boot_observed', builder)
         self.assertIn('flash_requires_user_authorization', builder)
 
-    def test_sleep_out_and_display_on_are_not_sent_twice(self):
+    def test_sleep_out_is_replayed_and_display_on_is_sent_once(self):
         self.assertNotIn('mipi_dsi_dcs_exit_sleep_mode', self.driver)
-        self.assertNotIn('mipi_dsi_dcs_set_display_on', self.driver)
+        self.assertEqual(self.driver.count('mipi_dsi_dcs_set_display_on'), 2,
+                         'prepare and ESD recovery each need one display-on command')
         dcs = [command['payload'][1] for command in self.profile['init_sequence']['commands']
                if len(command['payload']) > 1]
         self.assertIn(0x11, dcs)
-        self.assertIn(0x29, dcs)
+        self.assertNotEqual(dcs[-1], 0x29,
+                            'the sequence has no final display-on; the vendor sends it separately')
 
 
 if __name__ == '__main__':
