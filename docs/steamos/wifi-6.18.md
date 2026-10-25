@@ -224,17 +224,51 @@ initramfs，因为 `CONFIG_CFG80211_REQUIRE_SIGNED_REGDB=y`。
 `nsenter -t <NetworkManager pid> -m -p -r -w -- nmcli ...` 进入 GUI 会话的
 命名空间执行的；`iw`/`nmcli` 只能在那个命名空间里读到 system D-Bus。
 
-### 仍未验证：关联与 DHCP
+### 关联、DHCP 与数据通路（已验收）
 
-NM 现在处于可用状态，但**还没有关联过任何 AP**：这台设备没有保存的连接
-配置（`/etc/NetworkManager/system-connections/` 不存在），而关联需要
-WPA2 口令。扫描结果里出现的 `UPC` 是开放网络，但未经确认不该擅自连别人的 AP。
-所以「关联、DHCP、桌面 Wi-Fi 图标」这三项保持未验收。
+用户报告从桌面点击连接失败。NM 日志显示失败发生在权限层，不是无线层：
+
+```text
+audit: op="connection-add" pid=347 uid=1000 result="fail" reason="Insufficient privileges"
+```
+
+以 root 在 GUI 会话命名空间里用同一个口令连接，链路一次成功：
+
+| 项目 | 实测 |
+| --- | --- |
+| 激活 | `Device 'wlan0' successfully activated`，NM 连接名 `xiaomi` |
+| 关联 | `iw link`：BSSID `88:c3:97:58:0d:bb`，5180 MHz，信号 -52 dBm |
+| 速率 | `rx bitrate 650.0 MBit/s VHT-MCS 7 80MHz short GI VHT-NSS 2`（802.11ac 2×2 80 MHz） |
+| DHCP | `192.168.1.172/24`，网关与 DNS 均 `192.168.1.1` |
+| 路由 | NM 自行加入 `192.168.1.0/24` 直连与 `default via 192.168.1.1 metric 600`；**没有手工路由**，vendor 时期那个零 gateway 问题在 6.18 上不复现 |
+| 数据通路 | `curl --interface wlan0 https://ports.ubuntu.com/ubuntu-ports/` → `200`，`91.189.92.20`，1.44 s，TLS 校验通过 |
+
+证据：`out/wifi-6.18/boot4-connect-root.txt`（口令已替换为 `<psk>`）、
+`boot4-link.txt`、`boot4-https.txt`。NM 已把该连接保存为系统配置，后续启动应能
+自动重连，但**自动重连本身尚未在新的冷启动里复验**。
+
+### 仍未验收：桌面账户的 Wi-Fi 权限
+
+桌面用户 `steamos`（uid 1000）在 polkit 上拿到的是 `auth` 而不是 `yes`：
+
+```text
+org.freedesktop.NetworkManager.network-control        auth
+org.freedesktop.NetworkManager.settings.modify.system auth
+org.freedesktop.NetworkManager.wifi.scan              auth
+org.freedesktop.NetworkManager.enable-disable-wifi    no
+```
+
+polkitd 在跑（PID 1065）。这与 vendor 路径记录的「Polkit 进程身份读取失败」
+是同一类问题的入口，但根因未必相同（那次是 4.19 的 fdinfo 归属），6.18 上要
+重新判定：是会话注册/logind 的问题，还是 SteamOS 镜像里缺对应的 polkit 规则。
+在修好之前，桌面点击连接会失败，而 root/NM 的链路是通的。
 
 ## 下一步（未做）
 
-1. 关联与 DHCP：`nmcli dev wifi connect <ssid> password <psk>`（或桌面 UI）走一次，
-   确认关联、DHCP、路由；vendor 那套零 gateway 路由补丁在 6.18 上不需要。
+1. 桌面账户的 polkit 授权：让 uid 1000 拿到 `network-control`、
+   `settings.modify.system`、`wifi.scan`、`enable-disable-wifi` 的 `yes`，
+   桌面才能真正点连接；先判定根因，再决定是加规则还是沿用 vendor 的 polkitd 身份方案。
+2. 冷启动自动重连：确认保存的连接在干净启动后自动关联并拿到地址。
 2. 蓝牙：先解决 `bt-enable-gpios` 到底是 TLMM 76 还是 21 的冲突，再走 `hci_qca`。
 3. 监管域与省电：`ath11k` 的 `regdb.bin`（本机 vendor 分区里有，19,348 字节）
    目前没提供，扫描工作正常，若后续出现监管域告警再补。
