@@ -109,9 +109,15 @@
 `bt-partition.txt`、`bt-param-apdp.txt`（出厂地址不可得）、
 `bootA-rfkill-state.txt`（持久化 rfkill 状态）。
 
+### 冷启动自动上电（已复验）
+
+干净重启（uptime 0 分钟、没有手工 `rfkill` 或 `hciconfig`）后，`hci0` 直接是
+`UP RUNNING`，`bluetoothctl show` 也直接给出控制器与 `Powered: yes`。
+所以持久化的 rfkill 状态改成 `0` 之后，开机即用。证据
+`out/wifi-6.18/bootD-bt-autopower.txt`。
+
 ### 仍未做
 
-- 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）。
-- 冷启动后是否需要人工干预：本轮状态文件已改为 `0`，但"重启后自动上电"还没有
-  单独复验。
+- 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
+  当前用的是本地管理地址 `02:00:00:00:5A:AD`。
 - 配对/连接（需要一台可控的外设）。
