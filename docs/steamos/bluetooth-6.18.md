@@ -240,6 +240,39 @@ PipeWire 从来没有去连 BlueZ 的 D-Bus（与 `busctl monitor` 的 0 次调�
    经典蓝牙音频支持，需要换/补 PipeWire、WirePlumber 或 BlueZ。
 3. 这条链路已经与设备树、内核配置无关，属于 SteamOS 适配层。
 
+## 用主机做真实对端测试（已验证链路层）
+
+为了不再只靠平板自说自话，用本机（Intel AX210，`hci0`）当对端做了一次真连接：
+
+| 步骤 | 结果 |
+| --- | --- |
+| 平板设为 `Discoverable: yes` / `Pairable: yes` | 成功 |
+| 主机扫描 | 发现 `02:00:00:00:5A:AD frame`（本地管理地址工作正常） |
+| 主机 `bluetoothctl pair` | **`Paired: yes` / `Bonded: yes`** |
+| SDP 服务发现 | `ServicesResolved: yes` → 真实 ACL 连接与 L2CAP 数据交换走通 |
+| 平板公布的 SDP 服务 | GAP、GATT、Device Information、**AVRCP CT / AVRCP TG**、Multi Profile —— **没有 Audio Source / Audio Sink** |
+| 主机发起的 A2DP 连接 | 同样 `br-connection-profile-unavailable` |
+
+也就是说：**控制器、射频、配对、ACL、L2CAP、SDP 全部正常**，缺的确实是 A2DP
+这个 profile——与 WirePlumber 不注册端点完全一致，而且这次是从对端观察到的。
+
+`l2ping` 没能跑（需要 CAP_NET_RAW，本机 sudo 需要密码），但 SDP 往返已经证明
+数据面可用。
+
+### 与主机镜像的对照
+
+| | 主机（WirePlumber 0.4.17） | 平板（SteamOS, WirePlumber 0.5.18） |
+| --- | --- | --- |
+| `monitors/bluez.lua` | 有（0.4 架构） | 无——而且 **上游 0.5.18 本来就没有**（下载 0.5.18 源码比对确认） |
+| `wireplumber.conf` 的 bluez 组件 | — | 与上游 0.5.18 逐行一致（10 个 `monitors/bluez/*` 条目，`enumerate-device.lua` 提供 `monitor.bluez`） |
+| `Endpoints registered`（bluetoothd） | 有：`/MediaEndpoint/A2DPSink/…`、`A2DPSource/…` | **0 条** |
+| `api.bluez5.monitor` 工厂 | 使用中 | 从未实例化 |
+
+所以平板用的是**原版** WirePlumber 0.5.18（`pacman -Qkk` 0 改动、配置与上游一致），
+问题不在「镜像删文件」，而是 0.5.18 的 bluez 监视器在这台设备上没有把
+`api.bluez5.monitor` 拉起来——这一步属于 WirePlumber/PipeWire 用户空间，
+内核侧已被主机对端测试证明无问题。
+
 ### 仍未做
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
