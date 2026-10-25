@@ -10,6 +10,7 @@
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
 
 #include <linux/debugfs.h>
+#include <linux/delay.h>
 #include <linux/dma-buf.h>
 #include <linux/of_irq.h>
 #include <linux/pm_opp.h>
@@ -1139,6 +1140,42 @@ unsigned long dpu_kms_get_clk_rate(struct dpu_kms *dpu_kms, char *clock_name)
 
 #define	DPU_PERF_DEFAULT_MAX_CORE_CLK_RATE	412500000
 
+/*
+ * The bootloader can leave a video interface scanning out its splash buffer.
+ * DPU does not take that pipeline over: the stale fetches fault in the new
+ * IOMMU domain, and on the first modeset the DSI video engine would start
+ * streaming the old timing before the panel has received its init commands.
+ * Stop such timing engines; the first modeset reprograms them.
+ */
+static void dpu_kms_stop_boot_intfs(struct dpu_kms *dpu_kms)
+{
+	const struct dpu_mdss_cfg *catalog = dpu_kms->catalog;
+	struct dpu_hw_intf_status status;
+	struct dpu_hw_intf *intf;
+	bool stopped = false;
+	int i;
+
+	for (i = 0; i < catalog->intf_count; i++) {
+		intf = dpu_rm_get_intf(&dpu_kms->rm, catalog->intf[i].id);
+		if (!intf || !intf->ops.get_status || !intf->ops.enable_timing)
+			continue;
+
+		memset(&status, 0, sizeof(status));
+		intf->ops.get_status(intf, &status);
+		if (!status.is_en)
+			continue;
+
+		drm_info(dpu_kms->dev, "stopping INTF_%d left enabled by the bootloader\n",
+			 catalog->intf[i].id - INTF_0);
+		intf->ops.enable_timing(intf, 0);
+		stopped = true;
+	}
+
+	/* The timing engine stops at the end of its frame: allow two 60 Hz frames. */
+	if (stopped)
+		msleep(40);
+}
+
 static int dpu_kms_hw_init(struct msm_kms *kms)
 {
 	struct dpu_kms *dpu_kms;
@@ -1207,6 +1244,8 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
 		DPU_ERROR("rm init failed: %d\n", rc);
 		goto err_pm_put;
 	}
+
+	dpu_kms_stop_boot_intfs(dpu_kms);
 
 	dpu_kms->hw_mdp = dpu_hw_mdptop_init(dev,
 					     dpu_kms->catalog->mdp,

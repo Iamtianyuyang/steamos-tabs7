@@ -223,3 +223,35 @@ Steam 的 `steamwebhelper.log` 重复报 page allocator `Function not implemente
 Gamescope FB101，截图包含 Steam 的 Logging in 页面，CEF 不再出现原来的
 madvise 崩溃循环。但用户确认物理屏幕黑屏；DCS 仍为休眠 `08`、亮度零，
 所以仅确认 Steam 系统调用与界面生成已修复，冷启动面板交接仍未通过。
+
+### 冷启动交接：停止 bootloader 遗留的 INTF
+
+对照 #47 冷启动（73 秒）与手动 DPMS 后的寄存器快照：两者的 DSI_CTRL 均为主线写入的
+`0x173`，说明 DSI host 已由主线编程；但冷启动的 DSI0/1 FIFO_STATUS 为 `0x14441019`，
+比正常态 `0x10001010` 多出视频 MDP FIFO 溢出/欠载、DLN0 LP FIFO 溢出和三条 HS FIFO
+溢出的粘滞位。同一次启动的日志中，1.2–11.2 秒持续出现旧 splash 地址 `0x9c...` 的
+SMMU fault（每 5 秒约 80 万条，SID 0x820/0xc20），直到 11.6 秒 fbcon 第一次 modeset。
+
+原因：bootloader 让 INTF1/2 一直扫描 splash，主线 DPU 不接管也不停止它们。第一次
+modeset 的 DSI pre_enable 打开视频引擎时，旧时序立即开始推流，面板初始化命令随后
+才以 LP 发出，被挤掉，面板仍读回休眠 `08`。手动 DPMS 时 encoder disable 已关闭
+INTF，所以同样的命令能被接收。
+
+修正只在 `dpu_kms_hw_init()` 中、RM 建好 INTF 之后、创建 DRM 对象之前，读取每个
+INTF 的状态，把仍在运行的时序引擎关掉并等两帧；没有改 DSI、PHY、面板时序或 DTS。
+主机测试执行实际 helper：INTF_1/INTF_2 运行时各写一次并等待 40 ms，空闲时不写、不等待，
+并检查调用顺序；去掉修正时测试失败。总计 86 项通过、1 项跳过。
+
+候选 BOOT `4aae9eaed3f1488c14bc57d777cf28524e4dd508fc80e5ed47d03d79b2d74db6`
+只换内核（`.config` 哈希仍为 `9b677c4a...`，DTB、initramfs 和命令行与 #47 相同）。
+从运行中的 6.18 写入 `/dev/sda22`，清缓存后完整读回一致；DTBO `9383ef37...`、
+VBMETA `c92f5f6a...` 未变。6.18.58 #49 冷启动结果：
+
+- 1.11 秒记录 `stopping INTF_1/INTF_2 left enabled by the bootloader`；
+- 整次启动 SMMU fault 共 10 条，`dsi_err_worker` 为 0，ESD IRQ164 仅 1 次边沿且无恢复；
+- 内核执行 `/init` 从 11.9 秒提前到 1.67 秒（原来的 10 秒被 fault 风暴占用）；
+- 未做任何手动 DPMS 或 modetest，用户先看到控制台文字，随后确认 **进入 Steam 界面**；
+  DRM 扫描的是 `gamescope-xwm` 分配的 FB100。
+
+因此冷启动面板交接通过一次实测。仍待：重复冷启动、触摸与 Steam 内操作、亮度 / 关屏 /
+唤醒。原始记录在 `boot-intf-stop/`（`flash-session.txt`、`coldboot-steam.txt`）。
