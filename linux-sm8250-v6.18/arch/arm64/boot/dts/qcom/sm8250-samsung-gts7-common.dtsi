@@ -486,6 +486,17 @@
 		firmware-name = "htnv20.bin", "htbtfw20.tlv";
 
 		/*
+		 * The vendor provisioning lives in the (encrypted) efs/sec_efs
+		 * partitions, which mainline cannot read, and the upstream NVM
+		 * carries no address, so the controller reports an invalid one.
+		 * Pin a locally administered address instead; hci_qca is patched
+		 * to honour this property. Same value for every gts7lwifi build.
+		 *
+		 * The property is little endian: this is 02:00:00:00:5a:ad.
+		 */
+		local-bd-address = [ ad 5a 00 00 00 02 ];
+
+		/*
 		 * hci_qca asks the pwrseq provider for the "bluetooth" target on
 		 * qca6390; pwrseq_qcom_wcn_match() recognises this node only
 		 * through vddaon-supply -> LDO -> regulators -> PMU, so the PMU

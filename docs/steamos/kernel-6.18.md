@@ -107,7 +107,7 @@ DTS 还没跑过 `dtbs_check`。
 | GPU（Turnip KGSL → Zink → wlroots/gamescope） | 私有 Mesa 走厂商 `KGSL`，双 VIG 由私有补丁拆分 | **主线没有 KGSL**，换成上游 `msm` + freedreno/Turnip。私有前缀 `turnip-kgsl/`、`mesa-zink*`、`gamescope-sm-t870` 的构建前提都变了 |
 | 面板与双 VIG | 厂商 DSI/DPU 行为 + `WLR_DRM_SM_T870_SPLIT=65,86` | 面板驱动是项目自带的；主线应在 DPU 内部完成左右拆分，见[面板与双 VIG](panel-6.18.md) |
 | 触摸 | 厂商 `sec_touchscreen`/nt36523 | 主线 `novatek-nvt-ts` 加 `novatek,nt36523-ts` 与面板跟随，协议相同；#51 在 Steam 内可点击，见[触摸记录](touch-6.18.md) |
-| Wi-Fi / 蓝牙 | 厂商 `qcacld` + CNSS + 私有 NetworkManager | Wi-Fi：主线已真机确认 PMU 时序、PCIe0（`17cb:1101`）、ath11k + 上游固件、关联/DHCP/HTTPS 与冷启动自动重连，见[主线 Wi-Fi](wifi-6.18.md)。蓝牙：`hci_qca` 已下载 rampatch/NVM 并建出 `hci0`，BlueZ 因 rfkill 仍 `DOWN RAW`，见[主线蓝牙](bluetooth-6.18.md) |
+| Wi-Fi / 蓝牙 | 厂商 `qcacld` + CNSS + 私有 NetworkManager | Wi-Fi：主线已真机确认 PMU 时序、PCIe0（`17cb:1101`）、ath11k + 上游固件、关联/DHCP/HTTPS 与冷启动自动重连，见[主线 Wi-Fi](wifi-6.18.md)。蓝牙：`hci_qca` + 上游 rampatch/NVM，`hci0` 已 `UP RUNNING`、BlueZ 已接管并可扫描；BD_ADDR 为本地管理地址，见[主线蓝牙](bluetooth-6.18.md) |
 
 ## 真机启动记录（2026-10-24）
 

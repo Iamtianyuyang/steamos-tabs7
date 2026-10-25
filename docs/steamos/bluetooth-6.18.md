@@ -50,47 +50,68 @@
 | 控制器识别 | `QCA Product ID 0x10 / SOC 0x400a0200 / ROM 0x00000200 / Patch 0x00000d2b` |
 | hci 设备 | `/sys/class/bluetooth/hci0` 存在；`hciconfig`：`Type: Primary  Bus: UART`，`BD Address 00:00:00:00:5A:AD`，RX/TX 计数非零 |
 
-## 未验收：hci0 卡在 unconfigured（BD_ADDR 无效）
+## hci0 的 unconfigured：根因与修复（已解决）
 
-`hciconfig` 显示 `DOWN RAW`，`bluetoothctl show` 报
+现象：`hciconfig` 显示 `DOWN RAW`，`bluetoothctl show` 报
 `No default controller available`，`hciconfig hci0 up` 返回
-**`Can't init device hci0: Operation not supported (95)`**。
+`Can't init device hci0: Operation not supported (95)`。
 
-排查顺序与结论：
+### 两层原因
 
-1. **先排除了 rfkill 的一层**：`/var/lib/systemd/rfkill/` 里有三个持久状态文件，
-   其中 `platform-998000.serial:bluetooth` 与 vendor 时代的
-   `platform-vendor:bt_qca6390:bluetooth` 都存着 `'1'`（已阻塞）。
-   `systemd-rfkill` 开机把它们套用到新设备上，所以 `rfkill list` 一开始把
-   `hci0` 标成 `Soft blocked: yes`。`rfkill unblock bluetooth` 之后
-   `rfkill list` 变成 `Soft blocked: no`（sysfs 的 `state` 仍读 1，是那个已知的
-   sysfs 读数不一致，netlink 视图才是权威）。**rfkill 不是最终原因。**
-2. **`-EOPNOTSUPP` 来自 `HCI_UNCONFIGURED`**：`net/bluetooth/hci_core.c` 里
-   `hci_dev_open`/`hci_dev_open_sync` 对 `HCI_UNCONFIGURED` 一律返回
-   `-EOPNOTSUPP`（只有 user channel 能打开）。
-3. **为什么会被标 unconfigured**：`hci_dev_setup_sync()` 在
-   `invalid_bdaddr` 为真时设这个标志。控制器自己报的地址是
-   `00:00:00:00:5A:AD`（即 ROME 默认值，前缀全 0），属于无效地址。
-   而 `hci_qca` 并不设置 `HCI_QUIRK_USE_BDADDR_PROPERTY`，所以即使 DT 里写了
-   `local-bd-address` 也不会被读取——上游 QCA6390 板子是靠 NVM 里的有效地址
-   走过这一关的。
+1. **rfkill 的持久化状态**：`/var/lib/systemd/rfkill/` 里
+   `platform-998000.serial:bluetooth` 和 vendor 时代的
+   `platform-vendor:bt_qca6390:bluetooth` 都存着 `'1'`，`systemd-rfkill`
+   开机套用到新设备上，于是 `rfkill list` 把 `hci0` 标成软阻塞。
+   `rfkill unblock bluetooth` 解决，并把状态改写成 `'0'`（现在该文件已是 `0`；
+   旧的 `platform-vendor:...` 文件仍是 `1`，但那个设备名不会再出现）。
+   sysfs 的 `state` 仍读 1，这是已知的 sysfs 读数不一致，以 netlink 为准。
+2. **`HCI_UNCONFIGURED`**：`hci_dev_open()` 对 unconfigured 设备返回
+   `-EOPNOTSUPP`。该标志由 `hci_dev_setup_sync()` 在 BD_ADDR 无效时设置。
+   控制器报的是 `00:00:00:00:5A:AD`（ROME 默认值），因为上游
+   `htnv20.bin` 不带这台设备的出厂地址；而 `hci_qca` 从不设置
+   `HCI_QUIRK_USE_BDADDR_PROPERTY`，所以 DT 里写了 `local-bd-address` 也无效。
 
-也就是说：**本次用的上游 `htnv20.bin` 没有这台设备的 BT 出厂地址**。Samsung 把
-它放在 vendor 分区（param/persist），由 vendor 栈开机后写入；主线没有这一步。
+### 出厂地址读不出来
 
-### 建议的下一步（两件事，都还没做）
+三星把 BT MAC 放在 **加密的** `efs` / `sec_efs`（首字节即随机密文，mainline
+既不能挂载也不能解密），`bluetooth`/`btd` 分区全 0，`param`/`apdp` 里没有可识别
+的地址，SteamOS 的 `set_mac_addresses.sh` 读的是 Steam Frame 的 EEPROM
+（`eeprom_console get mac_addr_ble`），在这台机器上返回空。所以 mainline 无法
+取得原始地址。
 
-1. 从本机 vendor 分区读出这台设备真正的 BT MAC，写进 DT 的 `local-bd-address`；
-2. 给 `hci_qca` 加一个小补丁：当 serdev 节点有 `local-bd-address` 时设置
-   `HCI_QUIRK_USE_BDADDR_PROPERTY`（`btnxpuart.c` 就是这么处理的），
-   这样 `hci_dev_setup_sync()` 会用 DT 地址走 `set_bdaddr`，unconfigured 标志
-   就不会被设置。
+### 处理方式
 
-在这两步之前，蓝牙只能停在"控制器可通信、rampatch/NVM 已加载、`hci0` 存在"
-这一层，不能声明"蓝牙可用"。
+- `drivers/bluetooth/hci_qca.c`：在拿到 `hdev` 之后，如果 DT 有
+  `local-bd-address` 且没有 `qcom,local-bd-address-broken`，就设置
+  `HCI_QUIRK_USE_BDADDR_PROPERTY`（照 `btnxpuart` 的做法）。这样
+  `hci_dev_setup_sync()` 会用 DT 地址走 `set_bdaddr`，不再标 unconfigured。
+- DT：`local-bd-address = [ ad 5a 00 00 00 02 ]`，即
+  **02:00:00:00:5A:AD**（本地管理位、单播）。注意该属性是**小端**字节序：
+  最初写成 `[ 02 00 00 00 5a ad ]`，控制器报出来就是 `AD:5A:00:00:00:02`，
+  这一点是在真机上确认的。
+- 这是**本地管理地址**，不是三星出厂地址，而且对每个 gts7lwifi 构建都相同；
+  真实地址需要回到 vendor 4.19 内核里读 `/efs`，属于后续可选工作。
 
-证据：`out/wifi-6.18/bootA-bt.txt`、`bootA-bt-userspace.txt`、
-`bootA-rfkill-state.txt`（持久化 rfkill 状态）、`bootA-rfkill-unblock.txt`、
-`bootA-bt-poweron.txt`、`bootA-bt-hciup2.txt`（`Operation not supported`）、
-`bootA-bt-journal.txt`，以及首轮的 `boot9-bt.txt`（`qca/qca/` 路径错误）和
-`boot7-serdev*.txt`（serdev 逐层排查）。
+### 真机结果
+
+候选 BOOT `out/steamos-kernel-6.18/wifi-bt7/boot.img`
+（SHA-256 `a167a51f0e4660f17aad283e39c30de1d6a64be2c80502aa3ea7e9e1a2149801`）。
+
+| 观察 | 证据 |
+| --- | --- |
+| 控制器上电 | `hciconfig hci0`：`BD Address 02:00:00:00:5A:AD`，`ACL MTU 1024:7 SCO MTU 240:4`，**`UP RUNNING`** |
+| BlueZ 接管 | `bluetoothctl show`：`Controller 02:00:00:00:5A:AD (public)`，`Manufacturer 0x001d (Qualcomm)`，`Powered: yes`，`Name: frame` |
+| 扫描 | `bluetoothctl scan on` 12 秒发现 **18 台设备**（含 `midea`、`54:14:A7:…` 等），`devices` 列表可读 |
+| rfkill 状态 | `/var/lib/systemd/rfkill/platform-998000.serial:bluetooth` 现为 `0` |
+
+证据：`out/wifi-6.18/bootB-bt.txt`、`bootB-bt-scan.txt`（首轮扫描，地址尚未修正）、
+`bootC-bt.txt`、`bootC-bt-final.txt`（修正字节序后）、`bt-efs.txt`、
+`bt-partition.txt`、`bt-param-apdp.txt`（出厂地址不可得）、
+`bootA-rfkill-state.txt`（持久化 rfkill 状态）。
+
+### 仍未做
+
+- 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）。
+- 冷启动后是否需要人工干预：本轮状态文件已改为 `0`，但"重启后自动上电"还没有
+  单独复验。
+- 配对/连接（需要一台可控的外设）。

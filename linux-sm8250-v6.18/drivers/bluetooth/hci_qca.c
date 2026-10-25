@@ -2553,6 +2553,16 @@ static int qca_serdev_probe(struct serdev_device *serdev)
 		hdev->shutdown = qca_power_off;
 	}
 
+	/*
+	 * The NVM may ship without per-device provisioning, in which case the
+	 * controller reports an invalid BD_ADDR and hci_dev_setup_sync() marks
+	 * the device HCI_UNCONFIGURED, which makes it unopenable. Take the
+	 * address from the device tree then, the same way btnxpuart does.
+	 */
+	if (!qcadev->bdaddr_property_broken &&
+	    device_property_present(&serdev->dev, "local-bd-address"))
+		hci_set_quirk(hdev, HCI_QUIRK_USE_BDADDR_PROPERTY);
+
 	if (data) {
 		/* Wideband speech support must be set per driver since it can't
 		 * be queried via hci. Same with the valid le states quirk.

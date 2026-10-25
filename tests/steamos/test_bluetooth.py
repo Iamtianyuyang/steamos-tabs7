@@ -148,3 +148,25 @@ def test_config_asks_for_the_hci_uart_stack():
                                        path.read_text(errors='ignore'), re.M))
     for symbol in re.findall(r'^CONFIG_(\w+)=y$', text, re.M):
         assert symbol in declared, symbol
+
+
+def test_local_bd_address_is_provided_and_honoured():
+    """The NVM in linux-firmware has no per-device address, so the DT carries
+    one and hci_qca has to ask the core to use it."""
+    node = bt()
+    address = re.search(r'local-bd-address = \[ ([0-9a-f ]+)\];', node)
+    assert address, 'local-bd-address missing'
+    raw = [int(x, 16) for x in address.group(1).split()]
+    assert len(raw) == 6
+    # The property is little endian, so the address's first octet is the last
+    # property byte; that one must be a locally administered unicast address
+    # (top two bits 10b), i.e. 02:00:00:00:5a:ad here.
+    first = raw[5]
+    assert first & 0x02, 'must be a locally administered address'
+    assert not first & 0x01, 'must be unicast'
+    driver = (KERNEL / 'drivers/bluetooth/hci_qca.c').read_text()
+    assert 'local-bd-address' in driver
+    assert 'HCI_QUIRK_USE_BDADDR_PROPERTY' in driver
+    probe = block(driver, 'static int qca_serdev_probe(')
+    assert 'HCI_QUIRK_USE_BDADDR_PROPERTY' in probe
+    assert 'bdaddr_property_broken' in probe
