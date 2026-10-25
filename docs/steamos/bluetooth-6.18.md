@@ -210,20 +210,39 @@ src/service.c:btd_service_connect() a2dp-sink profile connect failed ...: Protoc
 `wireplumber.conf` 里也没有关闭 `monitor.bluez`（只有 `mixin.systemwide-session`
 里关掉 `monitor.bluez.seat-monitoring`）。
 
-### 下一步（SteamOS 用户空间，按顺序）
+### 更正一个中间结论：文件没缺，是监视器不启动
 
-1. 用 `PIPEWIRE_DEBUG=4` 起一个 `pipewire -c pipewire.conf`（或给
-   `wireplumber` 打开 `pipewire` 侧日志）看 bluez5 SPA 插件是否成功连上 system
-   D-Bus；`busctl monitor` 的 0 次调用说明它根本没连上或被跳过。
-2. 检查是不是会话/配置把 bluez 监视器跳过了：比对 `wireplumber` 的 profile
-   （`wpctl status` 里没有 Bluetooth 段）和 `/usr/share/wireplumber/wireplumber.conf`
-   的 `wireplumber.components`/`profiles` 实际生效项。
-3. 拿 vendor 4.19 镜像做对照：那边 A2DP 能用就说明这个镜像的 WP 组合有问题，
-   与主线内核无关。
+一度以为 `monitors/bluez.lua` 被镜像删了，实际不是：0.5.18 已经改成事件驱动，
+`provides = monitor.bluez` 由 `scripts/monitors/bluez/enumerate-device.lua` 提供，
+`pacman -Qkk wireplumber` 报告 **328 个文件、0 个被改动**，包是完整的。
+`wireplumber.conf` 里 `monitor.bluez` 及其全部 hook 都在，`WIREPLUMBER_DEBUG=D`
+显示它们全部注册成功。
+
+真正的现象是：`PIPEWIRE_DEBUG=4` 下整份日志里只有一条 bluez 记录，就是 SPA 库
+映射 `api.bluez5.* → bluez5/libspa-bluez5`，**这个工厂从未被实例化**，所以
+PipeWire 从来没有去连 BlueZ 的 D-Bus（与 `busctl monitor` 的 0 次调用一致）。
+
+| 层 | 结论 |
+| --- | --- |
+| 内核 / 固件 / 控制器 | 已验证可用（见上） |
+| BlueZ（适配器、扫描、配对、IRK） | 已验证可用 |
+| WirePlumber 配置与 bluez hook | 已加载，但 `api.bluez5.monitor` 设备从未被创建 |
+| 结果 | BlueZ 没有 A2DP 端点 → `Protocol not available` |
+
+### 下一步（SteamOS 用户空间）
+
+1. 在 PipeWire 运行中**触发一次 bluez 监视器事件**并抓 `create-bluez-device`
+   相关日志（`WIREPLUMBER_DEBUG=D` + `systemctl --user restart wireplumber`），
+   确认 `enumerate-device.lua` 是否真的枚举到适配器；如果它压根没跑，问题在
+   profile/component 解析，而不是 BlueZ。
+2. 对照 vendor 4.19 镜像：那边 A2DP 若可用，说明这是该 SteamOS 镜像的
+   PipeWire/WirePlumber 组合问题，与主线内核无关；若也不可用，则镜像本身不提供
+   经典蓝牙音频支持，需要换/补 PipeWire、WirePlumber 或 BlueZ。
+3. 这条链路已经与设备树、内核配置无关，属于 SteamOS 适配层。
 
 ### 仍未做
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
   当前用的是本地管理地址 `02:00:00:00:5A:AD`。
-- A2DP/HFP 连通：卡在 WirePlumber 完全不与 BlueZ 交互，见上。
+- A2DP/HFP 连通：卡在 `api.bluez5.monitor` 从未实例化，见上。
 
