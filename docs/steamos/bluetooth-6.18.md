@@ -319,7 +319,63 @@ monitor.bluez.properties = {
 
 若将来固件或耳机让 AAC 正常，删掉这段即可恢复多编码器协商。
 
+## 待查：用户自己播放时"没声音"
+
+记录时间：2026-10-25 夜。这一条**尚未定位**，留档以便继续。
+
+### 已经确认没问题的部分
+
+| 检查 | 结果 |
+| --- | --- |
+| 耳机连接状态 | `bluetoothctl devices Connected` → 耳机常在 |
+| 默认 sink | `bluez_output.88_92_CC_E5_1D_AE.1`，`api.bluez5.codec = "sbc"` |
+| 系统路径 | `pw-play`、`paplay` 都出声（用户确认） |
+| **应用路径** | `ffplay` 播放 mp4 时 `pactl list sink-inputs` 显示流挂在耳机 sink 上，**用户确认听到** |
+| Pulse 默认 sink | `pactl get-default-sink` 与 `wpctl` 的默认一致（都是耳机） |
+
+也就是说从 BlueZ 到 PipeWire 到 pulse 客户端这条链是通的，且已经用真实的
+应用流（不是只有测试工具）验证过。
+
+### 尚未定位的现象
+
+用户自己放东西时听不到声音，且"在界面里选择输出设备"没有效果。可能的方向
+（都还没验证）：
+
+1. **具体应用**没有产生播放流（该应用自己的音频设置/静音/音量 0）；
+2. 应用产生了流但绑到了内置扬声器（Stream 的 target 与系统默认不同）；
+3. 应用持有重连前的旧 sink 节点（节点已销毁 → 流空转）；
+4. 耳机被手机多点抢占（耳机自身切到别的源）。
+
+### 复现与取证方法（脚本未入库，设备上已清理）
+
+平板上临时跑过一个采样器：每 2 秒记录 `wpctl inspect @DEFAULT_AUDIO_SINK@`、
+`pactl list short sink-inputs`、`pactl list sink-inputs` 的
+`Sink Input / Sink: / Mute / Corked / Volume` 到 `/tmp/audio-trace.log`，
+持续 2 分钟；同时让用户播放，然后读日志即可判定是上面哪一种。
+
+### 测试素材（在设备上，不入仓库）
+
+`/home/steamos/Videos/bt-test.mp4`：30 秒 1280×720，音频**左右交替**
+（前 2 秒左 1 kHz、后 2 秒右 2 kHz），用下面的命令生成：
+
+```sh
+ffmpeg -y -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=30" \
+  -f lavfi -i "aevalsrc='if(lt(mod(t,4),2),0.35*sin(2*PI*1000*t),0)|if(lt(mod(t,4),2),0,0.35*sin(2*PI*2000*t))':s=48000:d=30" \
+  -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 128k \
+  -shortest -movflags +faststart bt-test.mp4
+```
+
+桌面上放了 `播放测试视频.desktop` 供 Desktop Mode 直接双击。Game Mode 里看不到
+窗口是正常的：`gamescope --backend drm --steam` 只显示 Steam 的窗口，ffplay 的
+窗口被挡住，但音频照常输出。
+
 ### 仍未做
+
+- 上面的"用户自己播放时无声"定位（需要用户配合在播放时取证）。
+- 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
+  当前用的是本地管理地址 `02:00:00:00:5A:AD`。
+
+
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
   当前用的是本地管理地址 `02:00:00:00:5A:AD`。
