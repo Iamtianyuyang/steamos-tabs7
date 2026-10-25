@@ -116,6 +116,54 @@
 所以持久化的 rfkill 状态改成 `0` 之后，开机即用。证据
 `out/wifi-6.18/bootD-bt-autopower.txt`。
 
+## 配对可以用，但连接失败（A2DP 不在）
+
+真机上蓝牙适配器、扫描、配对都正常，但 `bluetoothctl connect` 到耳机/手机都返回
+`org.bluez.Error.Failed br-connection-profile-unavailable`，bluetoothd 日志：
+
+```text
+src/service.c:btd_service_connect() a2dp-sink profile connect failed for 88:92:CC:E5:1D:AE: Protocol not available
+```
+
+### 这一轮已经修掉的三个配置缺口
+
+| 缺口 | 现象 | 修法 |
+| --- | --- | --- |
+| `CONFIG_BT_BREDR` / `BT_LE` 未开 | 配对能成，但任何 profile 连接都是 `Protocol not available`；`sco.o` 受 `BT_BREDR` 控制 | 片段补 `BT_BREDR`、`BT_LE`、`BT_RFCOMM`、`BT_BNEP` |
+| `CONFIG_HID_SUPPORT` 未开 | `HID`/`UHID`/`BT_HIDP` 全部被静默丢弃（`menuconfig` 门禁） | 片段补 `HID_SUPPORT`、`HID`、`UHID`、`BT_HIDP` |
+| 缺 AF_ALG | `generate_and_write_irk() Failed to open crypto`、`No IRK stored` | 片段补 `CRYPTO_USER_API{,_HASH,_SKCIPHER}` 等 |
+
+第三项在真机上确认有效：重启后日志从 `Failed to open crypto` 变成
+**`Generated IRK successfully`**（且不再有 `No IRK stored` 之后的报错）。
+
+### 仍然失败的具体位置
+
+清空 `dmesg` 并用 `bluetoothd -d -n` 抓到：
+
+```text
+profiles/audio/a2dp.c:a2dp_sink_probe() path /org/bluez/hci0/dev_88_92_CC_E5_1D_AE
+profiles/audio/a2dp.c:a2dp_sink_connect() path /org/bluez/hci0/dev_88_92_CC_E5_1D_AE
+src/service.c:btd_service_connect() a2dp-sink profile connect failed ...: Protocol not available
+```
+
+也就是失败发生在 `a2dp_sink_connect()` 的最开头，`avdtp_*` 一条日志都没打出来，
+说明还没走到 AVDTP/L2CAP 建链。内核侧已排除项（都在真机上验证过）：
+
+- `CONFIG_BT_BREDR=y`、`CONFIG_BT_LE=y`（`/proc/config.gz` 确认运行内核里是开的）；
+- 用 python 建 socket：`BTPROTO_L2CAP` OK、`BTPROTO_SCO` OK（`sco.o` 存在）；
+- `hciconfig hci0` 为 `UP RUNNING PSCAN`，`ACL MTU 1024:7 SCO MTU 240:4`；
+- 扫描能发现真实设备（12 秒 18 台），两台音频设备已 `Paired: yes / Bonded: yes`。
+
+### 下一步的候选（按优先级）
+
+1. 用 `btmon` 抓一次 connect（`CONFIG_BT_DEBUGFS` 已开，`btmon` 走 HCI 监控），看
+   BlueZ 在返回 ENOPROTOOPT 之前到底有没有发 HCI 命令；若没有，问题就在 BlueZ 侧
+   的 socket 选项/插件，而不是控制器。
+2. 排查是否为**旧 bond 的 link key 不匹配**：这两台设备是在 `BT_BREDR=n` 的内核上
+   配对的，删掉重配一次（`bluetoothctl remove` + 重新 `pair`）再看。
+3. 若确认是 BlueZ 5.79 A2DP 与内核 socket 选项不兼容，再考虑在镜像里换 BlueZ 版本或
+   打补丁；这属于 SteamOS 适配层，不再是内核设备树/配置的问题。
+
 ### 仍未做
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；

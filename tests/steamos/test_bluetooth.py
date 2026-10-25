@@ -139,7 +139,15 @@ def test_config_asks_for_the_hci_uart_stack():
     text = CONFIG.read_text()
     for symbol in ('CONFIG_SERIAL_DEV_BUS', 'CONFIG_SERIAL_DEV_CTRL_TTYPORT',
                    'CONFIG_BT', 'CONFIG_BT_HCIUART',
-                   'CONFIG_BT_HCIUART_SERDEV', 'CONFIG_BT_HCIUART_QCA'):
+                   'CONFIG_BT_HCIUART_SERDEV', 'CONFIG_BT_HCIUART_QCA',
+                   # Without BR/EDR there is no SCO socket and every profile
+                   # connect fails with "Protocol not available".
+                   'CONFIG_BT_BREDR', 'CONFIG_BT_LE', 'CONFIG_BT_RFCOMM',
+                   'CONFIG_BT_BNEP', 'CONFIG_BT_HIDP',
+                   # BT_HIDP depends on the HID core, LE HID goes through uhid.
+                   'CONFIG_HID_SUPPORT', 'CONFIG_HID', 'CONFIG_UHID',
+                   # BlueZ needs AF_ALG for IRK generation.
+                   'CONFIG_CRYPTO_USER_API', 'CONFIG_CRYPTO_USER_API_HASH'):
         assert re.search(rf'^{symbol}=y$', text, re.M), symbol
     declared = set()
     for path in KERNEL.glob('**/Kconfig*'):
