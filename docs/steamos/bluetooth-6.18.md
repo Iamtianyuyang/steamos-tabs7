@@ -50,14 +50,47 @@
 | 控制器识别 | `QCA Product ID 0x10 / SOC 0x400a0200 / ROM 0x00000200 / Patch 0x00000d2b` |
 | hci 设备 | `/sys/class/bluetooth/hci0` 存在；`hciconfig`：`Type: Primary  Bus: UART`，`BD Address 00:00:00:00:5A:AD`，RX/TX 计数非零 |
 
-## 未验收：BlueZ 起不来
+## 未验收：hci0 卡在 unconfigured（BD_ADDR 无效）
 
-`hciconfig` 显示 `DOWN RAW`，BlueZ 侧 `bluetoothctl show` 报
-`No default controller available`。`hci0` 自己的 rfkill 读出来是
-`state 1 / soft 1`，向 `soft` 写 0 后仍然读回 1——和 Wi-Fi 那个 phy0 的表现一样
-（`state 0` 与 `soft 1` 读数不一致）。这一步与 WiFi 的 rfkill 异常是同一个待查
-问题，而不是蓝牙固件或 UART 的问题。
+`hciconfig` 显示 `DOWN RAW`，`bluetoothctl show` 报
+`No default controller available`，`hciconfig hci0 up` 返回
+**`Can't init device hci0: Operation not supported (95)`**。
+
+排查顺序与结论：
+
+1. **先排除了 rfkill 的一层**：`/var/lib/systemd/rfkill/` 里有三个持久状态文件，
+   其中 `platform-998000.serial:bluetooth` 与 vendor 时代的
+   `platform-vendor:bt_qca6390:bluetooth` 都存着 `'1'`（已阻塞）。
+   `systemd-rfkill` 开机把它们套用到新设备上，所以 `rfkill list` 一开始把
+   `hci0` 标成 `Soft blocked: yes`。`rfkill unblock bluetooth` 之后
+   `rfkill list` 变成 `Soft blocked: no`（sysfs 的 `state` 仍读 1，是那个已知的
+   sysfs 读数不一致，netlink 视图才是权威）。**rfkill 不是最终原因。**
+2. **`-EOPNOTSUPP` 来自 `HCI_UNCONFIGURED`**：`net/bluetooth/hci_core.c` 里
+   `hci_dev_open`/`hci_dev_open_sync` 对 `HCI_UNCONFIGURED` 一律返回
+   `-EOPNOTSUPP`（只有 user channel 能打开）。
+3. **为什么会被标 unconfigured**：`hci_dev_setup_sync()` 在
+   `invalid_bdaddr` 为真时设这个标志。控制器自己报的地址是
+   `00:00:00:00:5A:AD`（即 ROME 默认值，前缀全 0），属于无效地址。
+   而 `hci_qca` 并不设置 `HCI_QUIRK_USE_BDADDR_PROPERTY`，所以即使 DT 里写了
+   `local-bd-address` 也不会被读取——上游 QCA6390 板子是靠 NVM 里的有效地址
+   走过这一关的。
+
+也就是说：**本次用的上游 `htnv20.bin` 没有这台设备的 BT 出厂地址**。Samsung 把
+它放在 vendor 分区（param/persist），由 vendor 栈开机后写入；主线没有这一步。
+
+### 建议的下一步（两件事，都还没做）
+
+1. 从本机 vendor 分区读出这台设备真正的 BT MAC，写进 DT 的 `local-bd-address`；
+2. 给 `hci_qca` 加一个小补丁：当 serdev 节点有 `local-bd-address` 时设置
+   `HCI_QUIRK_USE_BDADDR_PROPERTY`（`btnxpuart.c` 就是这么处理的），
+   这样 `hci_dev_setup_sync()` 会用 DT 地址走 `set_bdaddr`，unconfigured 标志
+   就不会被设置。
+
+在这两步之前，蓝牙只能停在"控制器可通信、rampatch/NVM 已加载、`hci0` 存在"
+这一层，不能声明"蓝牙可用"。
 
 证据：`out/wifi-6.18/bootA-bt.txt`、`bootA-bt-userspace.txt`、
-`bootA-bt-power2.txt`、`boot9-bt.txt`（首轮 `qca/qca/` 路径错误）、
+`bootA-rfkill-state.txt`（持久化 rfkill 状态）、`bootA-rfkill-unblock.txt`、
+`bootA-bt-poweron.txt`、`bootA-bt-hciup2.txt`（`Operation not supported`）、
+`bootA-bt-journal.txt`，以及首轮的 `boot9-bt.txt`（`qca/qca/` 路径错误）和
 `boot7-serdev*.txt`（serdev 逐层排查）。
