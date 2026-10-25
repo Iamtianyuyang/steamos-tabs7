@@ -51,6 +51,85 @@
 	};
 
 	/*
+	 * QCA6390 PMU: the module's 8 input rails, the WLAN enable line and the
+	 * PMU's own LDO outputs. The regulator handles the WLAN PCI device uses
+	 * tie it to this node (pwrseq_qcom_wcn_match() walks supply -> regulator
+	 * -> regulators -> this node), so the LDO children must stay nested here.
+	 *
+	 * Rails come from the live vendor DT of this device
+	 * (qcom,cnss-qca6490@b0000000): vdd-wlan-aon and vdd-wlan-dig are
+	 * pm8150_s6 (950 mV), vdd-wlan-io is pm8150_s4 (1.8 V), vdd-wlan-rfa1 is
+	 * pm8150_s5, vdd-wlan-rfa2 is pm8150a_s8 (1.35 V). Samsung's pm8150a is
+	 * the pm8150l of mainline: smps8 is the same 1.35 V rail. The vendor
+	 * fixes s5 at 2.04 V while this board's vreg_s5a_1p9 is left at its 1.9 V
+	 * default; PCIe 1p9 and RFA 1p9 are the same rail either way.
+	 *
+	 * wlan-en is TLMM 90 (vendor wlan-en-gpio and qca6390_wlan_en_active).
+	 * BT stays out of this node for now: the vendor source says bt-en is
+	 * TLMM 76 while the live vendor DT says 21, and 21 sits inside the
+	 * TrustZone-reserved fingerprint range - resolve that with the BT step.
+	 */
+	qca6390-pmu {
+		compatible = "qcom,qca6390-pmu";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&wlan_en_default>;
+
+		vddaon-supply = <&vreg_s6a_0p95>;
+		vddpmu-supply = <&vreg_s6a_0p95>;
+		vddrfa0p95-supply = <&vreg_s6a_0p95>;
+		vddrfa1p3-supply = <&vreg_s8c_1p35>;
+		vddrfa1p9-supply = <&vreg_s5a_1p9>;
+		vddpcie1p3-supply = <&vreg_s8c_1p35>;
+		vddpcie1p9-supply = <&vreg_s5a_1p9>;
+		vddio-supply = <&vreg_s4a_1p8>;
+
+		wlan-enable-gpios = <&tlmm 90 GPIO_ACTIVE_HIGH>;
+
+		regulators {
+			vreg_pmu_rfa_cmn: ldo0 {
+				regulator-name = "vreg_pmu_rfa_cmn";
+			};
+
+			vreg_pmu_aon_0p59: ldo1 {
+				regulator-name = "vreg_pmu_aon_0p59";
+			};
+
+			vreg_pmu_wlcx_0p8: ldo2 {
+				regulator-name = "vreg_pmu_wlcx_0p8";
+			};
+
+			vreg_pmu_wlmx_0p85: ldo3 {
+				regulator-name = "vreg_pmu_wlmx_0p85";
+			};
+
+			vreg_pmu_btcmx_0p85: ldo4 {
+				regulator-name = "vreg_pmu_btcmx_0p85";
+			};
+
+			vreg_pmu_rfa_0p8: ldo5 {
+				regulator-name = "vreg_pmu_rfa_0p8";
+			};
+
+			vreg_pmu_rfa_1p2: ldo6 {
+				regulator-name = "vreg_pmu_rfa_1p2";
+			};
+
+			vreg_pmu_rfa_1p7: ldo7 {
+				regulator-name = "vreg_pmu_rfa_1p7";
+			};
+
+			vreg_pmu_pcie_0p9: ldo8 {
+				regulator-name = "vreg_pmu_pcie_0p9";
+			};
+
+			vreg_pmu_pcie_1p8: ldo9 {
+				regulator-name = "vreg_pmu_pcie_1p8";
+			};
+		};
+	};
+
+	/*
 	 * Vendor input_gts7l_common.dtsi: volume up is PM8150L GPIO3, active
 	 * low with a pull-up; volume down is the PON RESIN and power the PON
 	 * KPDPWR line (pm8150.dtsi qcom,pon_1/pon_2).
@@ -660,29 +739,47 @@
 */
 
 /* ----------------------------------------------------------------
- * PCIe0 + QCA6390 Wi-Fi / BT（阶段 E）
- * perst/wake GPIO 来自 sm8250.dtsi；wlan-en/bt-en 来自 downstream
+ * PCIe0 + QCA6390 Wi-Fi（阶段 E）
+ * perst/wake GPIO 来自 sm8250.dtsi；wlan-en 在 qca6390-pmu 里
  * ---------------------------------------------------------------- */
 &pcie0 {
-	status = "disabled";
+	status = "okay";
 
 	/* sm8250.dtsi 已定义 perst=tlmm79, wake=tlmm81 */
 	vdda-supply = <&vreg_l3a_0p93>;
 };
 
 &pcie0_phy {
-	status = "disabled";
+	status = "okay";
 
 	vdda-phy-supply = <&vreg_l5a_0p88>;
 	vdda-pll-supply = <&vreg_l9a_1p2>;
 };
 
-/* QCA6390 通过 PCIe 枚举，无需单独 DTS 节点；
- * wlan-en / bt-en 由 rfkill / hci userspace 控制
- * 若需在 DT 中声明 GPIO：
- *   wlan-en = tlmm90 (GPIO_ACTIVE_HIGH)
- *   bt-en   = tlmm76 (GPIO_ACTIVE_HIGH)
+/*
+ * The PCI device itself: 17cb:1101 is ATH11K inside the QCA6390 package, and
+ * pci-pwrctrl-pwrseq binds it before PCI enumeration to run the PMU power
+ * sequence. Its supplies are the PMU LDO outputs of qca6390-pmu above; that
+ * phandle chain is also how the pwrseq provider recognises this consumer, so
+ * vddaon-supply must point at an LDO under the PMU node. Same set as the
+ * upstream Xiaomi Pad 5 Pro (sm8250-xiaomi-elish-common).
  */
+&pcieport0 {
+	wifi@0 {
+		compatible = "pci17cb,1101";
+		reg = <0x10000 0x0 0x0 0x0 0x0>;
+
+		vddaon-supply = <&vreg_pmu_aon_0p59>;
+		vddrfacmn-supply = <&vreg_pmu_rfa_cmn>;
+		vddwlcx-supply = <&vreg_pmu_wlcx_0p8>;
+		vddwlmx-supply = <&vreg_pmu_wlmx_0p85>;
+		vddrfa0p8-supply = <&vreg_pmu_rfa_0p8>;
+		vddrfa1p2-supply = <&vreg_pmu_rfa_1p2>;
+		vddrfa1p7-supply = <&vreg_pmu_rfa_1p7>;
+		vddpcie0p9-supply = <&vreg_pmu_pcie_0p9>;
+		vddpcie1p8-supply = <&vreg_pmu_pcie_1p8>;
+	};
+};
 
 /* ----------------------------------------------------------------
  * microSD（阶段 E）
