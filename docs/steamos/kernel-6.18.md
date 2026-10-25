@@ -1,9 +1,11 @@
 # 内核迁移：厂商 4.19 → 主线 6.18 LTS
 
 SteamOS 的目标内核是主线 **6.18 LTS**（`linux-sm8250-v6.18/`，基线 6.18.58）。
-**6.18 至今没有在真机启动过**：现在设备上跑的每一项目标都仍由 Lineage/Samsung 4.19
-内核提供。这份文档记录为什么选 6.18、构建方式、从早先主线树移植过来的内容、配置映射，
-以及按依赖顺序排出的阻塞项。
+**6.18 已在真机启动，PLL 修正版已通过全屏彩色测试图，实际会话与自动出图仍待验收。**
+2026-10-25 的显示复测中，基线与仅补 display-on 的候选均被用户确认黑屏。
+4.19 回退已恢复过完整 Steam 画面；当前 6.18 PLL 修正版已通过全屏彩色测试图，实际会话与启动仍待验收，详见[显示恢复记录](display-recovery.md)。
+这份文档记录构建方式、配置映射和各项独立验收；连接器 `connected`、进程 `active`
+和 GPU 枚举成功都不能替代实际屏幕出图。
 
 ## 为什么是 6.18
 
@@ -47,7 +49,7 @@ scripts/build/mainline/build-steamos-6.18.sh image \
 `out/steamos-kernel-6.18/`。缓存目录是
 `~/.cache/tabs7linux/steamos-6.18-<项目路径哈希>/`（`TAB_S7_STEAMOS_BUILD_ROOT` 可覆盖）。
 
-当前结果（6.18.58，clang 18.1.3 / LLD 18，加显示层，零警告）：
+2026-10-24 构建记录（历史产物；当前诊断镜像见显示恢复记录，6.18.58，clang 18.1.3 / LLD 18）：
 
 | 产物 | SHA-256 |
 | --- | --- |
@@ -182,8 +184,8 @@ SPMI SID 2/0xa/0xb（pm8150b、pm8009）访问失败 `-5`，暂不影响。
 
 ## 真机 Game Mode 记录（2026-10-25）
 
-**状态：6.18.58 冷启动后自动进入 SteamOS Game Mode；systemd `running`、0 个失败单元，外层 USB/telnet 保持可用。**
-最终候选为 `out/boot-shim/steamos-mainline-final-20261025-02/boot.img`，SHA-256
+**进程运行记录：6.18.58 冷启动后自动启动 Game Mode 进程；systemd `running`、0 个失败单元，外层 USB/telnet 保持可用。实际显示仍未验收，后续复测确认黑屏，见[显示恢复记录](display-recovery.md)。**
+当时的候选为 `out/boot-shim/steamos-mainline-final-20261025-02/boot.img`，SHA-256
 `432d5c56c8d7b774e993f1bfbaeb8d5f00602b86bd77d1a641e04bf7a66d1f54`，写入 `/dev/sda22` 后读回一致。
 
 - UFS 的 `PARTNAME=userdata` 找到 `/dev/sda35`，F2FS 双超级块和 UUID 校验通过，持久 SteamOS 可写挂载。
