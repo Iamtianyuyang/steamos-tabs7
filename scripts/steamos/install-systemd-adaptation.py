@@ -165,6 +165,8 @@ def install(tree, busybox, game_mode=None):
                    (SOURCE / '69-tabs7-power-button.rules').read_bytes())
         tree.write('etc/polkit-1/rules.d/50-tabs7-steamos-suspend.rules',
                    (SOURCE / '50-tabs7-steamos-suspend.rules').read_bytes())
+        tree.write('etc/polkit-1/rules.d/50-tabs7-networkmanager.rules',
+                   (SOURCE / '50-tabs7-networkmanager.rules').read_bytes())
         tree.write('etc/systemd/user/steamos-powerbuttond.service',
                    (SOURCE / 'steamos-powerbuttond.service').read_bytes())
         tree.link('etc/systemd/user/default.target.wants/steamos-powerbuttond.service',

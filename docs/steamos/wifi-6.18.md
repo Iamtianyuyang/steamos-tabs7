@@ -247,28 +247,46 @@ audit: op="connection-add" pid=347 uid=1000 result="fail" reason="Insufficient p
 `boot4-link.txt`、`boot4-https.txt`。NM 已把该连接保存为系统配置，后续启动应能
 自动重连，但**自动重连本身尚未在新的冷启动里复验**。
 
-### 仍未验收：桌面账户的 Wi-Fi 权限
+### 桌面账户的 polkit 授权（已解决）
 
-桌面用户 `steamos`（uid 1000）在 polkit 上拿到的是 `auth` 而不是 `yes`：
+桌面用户 `steamos`（uid 1000）在 polkit 上拿到的是 `auth`/`no`，`nmcli` 记录的
+失败是 `connection-add ... uid=1000 result="fail" reason="Insufficient privileges"`。
 
-```text
-org.freedesktop.NetworkManager.network-control        auth
-org.freedesktop.NetworkManager.settings.modify.system auth
-org.freedesktop.NetworkManager.wifi.scan              auth
-org.freedesktop.NetworkManager.enable-disable-wifi    no
-```
+原因不是 polkitd 坏了，而是**会话没有 seat**：`loginctl list-sessions` 只有
+`c1 ... background` 和 `c2 ... manager` 两类，都没有 seat，所以
+`allow_active` 永远不适用，NetworkManager 的动作全部落到 `auth_admin`。这和
+项目已有的 suspend 规则是同一个机制问题。
 
-polkitd 在跑（PID 1065）。这与 vendor 路径记录的「Polkit 进程身份读取失败」
-是同一类问题的入口，但根因未必相同（那次是 4.19 的 fdinfo 归属），6.18 上要
-重新判定：是会话注册/logind 的问题，还是 SteamOS 镜像里缺对应的 polkit 规则。
-在修好之前，桌面点击连接会失败，而 root/NM 的链路是通的。
+仓库里其实早有一条 `49-tabs7-network.rules`，但两个原因让它没生效：它匹配的
+用户是 `"linux"`（旧 vendor 镜像的账户名，这台的 SteamOS 是 `steamos`），而且
+**没有任何安装脚本引用它**，`/etc/polkit-1/rules.d/` 里根本没有这个文件。
+
+处理方式：
+
+- 规则移到 `userspace/steamos/systemd/50-tabs7-networkmanager.rules`，与
+  suspend 规则放在一起，匹配 `steamos` 与 `linux` 两个账户名；
+- 由 `scripts/steamos/install-systemd-adaptation.py` 写入
+  `/etc/polkit-1/rules.d/`，不再是被遗忘的孤文件；
+- 仍然只授予五个动作，不放开 `share.open`、`global-dns`、`hostname`。
+
+实机（把规则写到运行中的 rootfs，polkitd 自动 reload，11 条规则）：
+
+| 检查 | 结果 |
+| --- | --- |
+| `enable-disable-wifi` / `network-control` / `wifi.scan` | `yes` |
+| `settings.modify.own` / `settings.modify.system` | `yes` |
+| `settings.modify.global-dns` / `.hostname` | 仍 `auth`（未放开） |
+| uid 1000 执行 `nmcli connection modify xiaomi connection.autoconnect yes` | rc=0 |
+| uid 1000 执行 `nmcli device wifi rescan` | rc=0 |
+| uid 1000 执行 `nmcli dev wifi list` | 正常列出 AP |
+
+证据：`out/wifi-6.18/polkit-2.txt`、`polkit-install.txt`、`polkit-verify.txt`。
+桌面现在具备添加/修改/连接 Wi-Fi 的权限；界面上的最终点击仍建议由用户自己确认。
 
 ## 下一步（未做）
 
-1. 桌面账户的 polkit 授权：让 uid 1000 拿到 `network-control`、
-   `settings.modify.system`、`wifi.scan`、`enable-disable-wifi` 的 `yes`，
-   桌面才能真正点连接；先判定根因，再决定是加规则还是沿用 vendor 的 polkitd 身份方案。
-2. 冷启动自动重连：确认保存的连接在干净启动后自动关联并拿到地址。
+1. 冷启动自动重连：确认保存的连接在干净启动后自动关联并拿到地址，polkit 规则
+   在持久 rootfs 上重启后仍然生效。
 2. 蓝牙：先解决 `bt-enable-gpios` 到底是 TLMM 76 还是 21 的冲突，再走 `hci_qca`。
 3. 监管域与省电：`ath11k` 的 `regdb.bin`（本机 vendor 分区里有，19,348 字节）
    目前没提供，扫描工作正常，若后续出现监管域告警再补。

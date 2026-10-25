@@ -1,0 +1,21 @@
+// The tablet's desktop account manages its own network connections. Like the
+// suspend rule, Game Mode runs as a logind "background" session without a
+// seat, so login1/polkit's allow_active never applies and every NetworkManager
+// action falls back to auth_admin; without this rule the desktop cannot add a
+// Wi-Fi connection at all ("Insufficient privileges" in the NM audit log).
+//
+// The account name differs per image this project boots: the SteamOS rootfs
+// uses "steamos", the earlier vendor-path image used "linux".
+polkit.addRule(function(action, subject) {
+    var allowed = [
+        "org.freedesktop.NetworkManager.enable-disable-wifi",
+        "org.freedesktop.NetworkManager.network-control",
+        "org.freedesktop.NetworkManager.wifi.scan",
+        "org.freedesktop.NetworkManager.settings.modify.own",
+        "org.freedesktop.NetworkManager.settings.modify.system"
+    ];
+    var users = ["steamos", "linux"];
+    if (users.indexOf(subject.user) !== -1 && allowed.indexOf(action.id) !== -1) {
+        return polkit.Result.YES;
+    }
+});

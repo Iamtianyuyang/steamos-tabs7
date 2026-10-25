@@ -1,6 +1,7 @@
 """The SteamOS adaptation must be exactly reversible and match the initramfs marker."""
 import importlib.util
 import os
+import pathlib
 from pathlib import Path
 import re
 import tempfile
@@ -155,6 +156,18 @@ class PowerButtonTest(unittest.TestCase):
         self.assertNotIn('ExecCondition', directives)
         self.assertIn('ExecStart=/usr/lib/hwsupport/steamos-powerbuttond', unit)
         self.assertIn('WantedBy=default.target', unit)
+
+    def test_polkit_networkmanager_rule_covers_the_desktop_account(self):
+        """The desktop account has no seat, so allow_active never applies."""
+        rule = (adaptation.SOURCE / '50-tabs7-networkmanager.rules').read_text()
+        for action in ('enable-disable-wifi', 'network-control', 'wifi.scan',
+                       'settings.modify.own', 'settings.modify.system'):
+            self.assertIn(f'org.freedesktop.NetworkManager.{action}', rule)
+        self.assertIn('"steamos"', rule)
+        self.assertIn('polkit.Result.YES', rule)
+        # An uninstalled rule would be another orphan; the installer ships it.
+        installer = pathlib.Path(adaptation.__file__).read_text()
+        self.assertIn('50-tabs7-networkmanager.rules', installer)
 
     def test_polkit_grants_only_suspend(self):
         rule = (adaptation.SOURCE / '50-tabs7-steamos-suspend.rules').read_text()
