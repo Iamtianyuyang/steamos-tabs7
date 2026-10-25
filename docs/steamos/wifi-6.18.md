@@ -283,6 +283,20 @@ audit: op="connection-add" pid=347 uid=1000 result="fail" reason="Insufficient p
 证据：`out/wifi-6.18/polkit-2.txt`、`polkit-install.txt`、`polkit-verify.txt`。
 桌面现在具备添加/修改/连接 Wi-Fi 的权限；界面上的最终点击仍建议由用户自己确认。
 
+### 冷启动自动重连（已验收）
+
+规则写进持久 rootfs 后做了一次干净重启（内核仍是 `#3`，uptime 0 分钟）：
+
+| 项目 | 结果 |
+| --- | --- |
+| 自动关联 | `iw link`：`xiaomi`，BSSID `88:c3:97:58:0d:bb`，5180 MHz，-57 dBm，已有收发计数 |
+| DHCP | `192.168.1.122/24`（本轮新租约） |
+| 路由 | `default via 192.168.1.1 dev wlan0 metric 600` 与直连路由均在，无需手工操作 |
+| polkit 规则 | `/etc/polkit-1/rules.d/50-tabs7-networkmanager.rules` 仍在，四项动作重启后仍为 `yes` |
+
+证据：`out/wifi-6.18/boot5-autoreconnect.txt`、`boot5-polkit.txt`。至此主线 6.18
+的 Wi-Fi 从电源、PCIe、固件、关联、DHCP、数据通路到桌面权限都有真机记录。
+
 ## 下一步（未做）
 
 1. 冷启动自动重连：确认保存的连接在干净启动后自动关联并拿到地址，polkit 规则
