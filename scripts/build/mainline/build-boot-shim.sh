@@ -15,10 +15,12 @@ dtb=$(realpath "${2:-$project_root/out/bringup/sm8250-samsung-gts7lwifi.dtb}")
 out_dir=$project_root/out/boot-shim
 # Paths with spaces break .incbin quoting and Kbuild alike; build in the cache.
 work=${XDG_CACHE_HOME:-$HOME/.cache}/tabs7linux/boot-shim-$project_id
-# 24 MiB: the audio stack (ADSP/Q6/ASoC) grew the Image past what 20 MiB
-# leaves after the 4 MiB move offset. ABL places the ramdisk and its DTB
-# beyond image_size (the stock 55 MB kernel boots), so this only pads.
-reserve=$((24 << 20))
+# 28 MiB: the audio stack took it past 20 MiB and the BT/PCIe/HCI firmware
+# stack (image_size, not file size) now needs more than 24 MiB once the 4 MiB
+# move offset, the DTB and the shim stack are accounted for. ABL places the
+# ramdisk and its DTB beyond image_size (the stock 55 MB kernel boots), so this
+# only pads inside the 71 MB BOOT partition.
+reserve=$((28 << 20))
 export PATH="$project_root/out/tools/llvm/usr/bin:$PATH"
 
 rm -rf "$work"

@@ -49,6 +49,13 @@ for name in regulatory.db regulatory.db.p7s; do
     [[ -f "$ath11k/$name" ]] || { echo "Missing $ath11k/$name" >&2; exit 1; }
 done
 cp "$ath11k"/regulatory.db "$ath11k"/regulatory.db.p7s "$rootfs/lib/firmware/"
+# Bluetooth: hci_qca loads the NVM and rampatch at probe, also before the
+# SteamOS root exists. Upstream linux-firmware qca/ names.
+bt="$project_root/out/firmware/bluetooth"
+(cd "$bt" && sha256sum --quiet -c SHA256SUMS) ||
+    { echo "Bluetooth firmware missing or changed: $bt" >&2; exit 1; }
+mkdir -p "$rootfs/lib/firmware/qca"
+cp "$bt"/qca/htnv20.bin "$bt"/qca/htbtfw20.tlv "$rootfs/lib/firmware/qca/"
 mkdir -p "$rootfs/lib/firmware/ath11k/QCA6390/hw2.0"
 cp "$ath11k"/QCA6390/hw2.0/amss.bin "$ath11k"/QCA6390/hw2.0/m3.bin \
    "$ath11k"/QCA6390/hw2.0/board-2.bin "$rootfs/lib/firmware/ath11k/QCA6390/hw2.0/"

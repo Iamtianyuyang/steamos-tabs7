@@ -126,23 +126,23 @@ def test_wlan_enable_line_matches_the_vendor_gpio():
     if not pinctrl.exists():
         pytest.skip('prepared vendor pinctrl unavailable')
     assert 'pins = "gpio90";' in block(pinctrl.read_text(), 'qca6390_wlan_en_active:')
-    assert 'pinctrl-0 = <&wlan_en_default>;' in pmu()
+    assert 'pinctrl-0 = <&wlan_en_default>, <&bt_en_default>;' in pmu()
     assert 'pins = "gpio90";' in block(dts(), 'wlan_en_default:')
 
 
-def test_bluetooth_is_left_out_until_its_gpio_is_resolved():
-    """Vendor source says bt-en is TLMM 76, the live vendor DT says 21.
+def test_bluetooth_enable_line_is_resolved_by_the_board_dtsi():
+    """The live vendor DT reports GPIO 21, the board dtsi GPIO 76.
 
-    21 is inside the TrustZone-reserved fingerprint range (20-23) this board
-    declares, so neither value is safe to adopt from the WiFi step alone.
+    21 sits inside the TrustZone-reserved fingerprint range this board
+    declares, so the board dtsi wins; the step-2 Bluetooth node carries it.
     """
     gts7l = (VENDOR_GTS7L / 'kona-sec-gts7l-r00.dtsi')
-    if gts7l.exists():
-        assert 'qcom,bt-en-gpio = <&tlmm 76 0>;' in gts7l.read_text()
-    ours = pmu()
-    assert 'bt-enable-gpios' not in ours
-    assert 'bt-enable-gpios' not in wifi()
+    if not gts7l.exists():
+        pytest.skip('prepared vendor dtsi unavailable')
+    assert 'qcom,bt-en-gpio = <&tlmm 76 0>;' in gts7l.read_text()
     assert 'gpio-reserved-ranges = <20 4>' in dts()
+    assert 'bt-enable-gpios = <&tlmm 76 GPIO_ACTIVE_HIGH>;' in pmu()
+
 
 
 def test_pmu_regulators_nest_under_the_pmu_node():

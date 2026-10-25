@@ -46,10 +46,6 @@
 		};
 	};
 
-	aliases {
-		serial0 = &uart6;
-	};
-
 	/*
 	 * QCA6390 PMU: the module's 8 input rails, the WLAN enable line and the
 	 * PMU's own LDO outputs. The regulator handles the WLAN PCI device uses
@@ -73,7 +69,7 @@
 		compatible = "qcom,qca6390-pmu";
 
 		pinctrl-names = "default";
-		pinctrl-0 = <&wlan_en_default>;
+		pinctrl-0 = <&wlan_en_default>, <&bt_en_default>;
 
 		vddaon-supply = <&vreg_s6a_0p95>;
 		vddpmu-supply = <&vreg_s6a_0p95>;
@@ -85,6 +81,7 @@
 		vddio-supply = <&vreg_s4a_1p8>;
 
 		wlan-enable-gpios = <&tlmm 90 GPIO_ACTIVE_HIGH>;
+		bt-enable-gpios = <&tlmm 76 GPIO_ACTIVE_HIGH>;
 
 		regulators {
 			vreg_pmu_rfa_cmn: ldo0 {
@@ -454,12 +451,54 @@
 &i2c0 { status = "okay"; };
 &qupv3_id_2 { status = "okay"; };
 
+&{/} {
+	/*
+	 * geni-serial derives its line index from a "serial" alias; without one
+	 * qcom_geni_serial fails probe with "Invalid line -19". This is not a
+	 * console alias: the kernel command line keeps console=tty0.
+	 */
+	aliases {
+		serial0 = &uart6;
+	};
+};
+
 /* ----------------------------------------------------------------
- * UART6 — debug serial
+ * Bluetooth: QCA6390 BT half on QUP0 SE6 (0x998000) with BT_EN on TLMM 76
+ *
+ * Vendor bluetooth_gts7l_common.dtsi is explicit: qca,bt-reset-gpio is
+ * <&tlmm 76 0>, its bt_en_sleep state drives that pin low, and it enables
+ * qupv3_se6_4uart (0x998000, mainline &uart6). The live vendor DT instead
+ * reports bt-en on GPIO 21, which is inside the TrustZone fingerprint range;
+ * the board dtsi wins. qca6390 has no supplies of its own in hci_qca
+ * (qca_soc_data_qca6390: num_vregs 0), the PMU rails come from the WLAN
+ * power sequence, so only the enable line and the UART are needed here.
  * ---------------------------------------------------------------- */
 &uart6 {
-	/* The downstream debug UART uses a different serial engine. */
-	status = "disabled";
+	status = "okay";
+
+	bluetooth {
+		compatible = "qcom,qca6390-bt";
+
+		/*
+		 * hci_qca prepends "qca/" itself, so these are bare file names;
+		 * the initramfs installs them as lib/firmware/qca/<name>.
+		 */
+		firmware-name = "htnv20.bin", "htbtfw20.tlv";
+
+		/*
+		 * hci_qca asks the pwrseq provider for the "bluetooth" target on
+		 * qca6390; pwrseq_qcom_wcn_match() recognises this node only
+		 * through vddaon-supply -> LDO -> regulators -> PMU, so the PMU
+		 * LDO handles are required here even though the driver's own vreg
+		 * list for qca6390 is empty. BT_EN stays on the PMU node.
+		 */
+		vddaon-supply = <&vreg_pmu_aon_0p59>;
+		vddrfacmn-supply = <&vreg_pmu_rfa_cmn>;
+		vddbtcmx-supply = <&vreg_pmu_btcmx_0p85>;
+		vddrfa0p8-supply = <&vreg_pmu_rfa_0p8>;
+		vddrfa1p2-supply = <&vreg_pmu_rfa_1p2>;
+		vddrfa1p7-supply = <&vreg_pmu_rfa_1p7>;
+	};
 };
 
 /* ----------------------------------------------------------------
