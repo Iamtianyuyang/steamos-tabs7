@@ -16,8 +16,11 @@ steam_env=(
 )
 
 # The panel is native portrait 1600x2560; "right" is upright landscape
-# (verified on hardware; "left" is upside down).
+# (verified on hardware; "left" is upside down). Touch mode 4 passes real
+# touch events to Steam, as the SteamOS session does; the default (1)
+# turns every contact into a left-button drag, so swipes cannot scroll.
 exec /usr/bin/gamescope --backend drm --steam \
     --force-orientation right \
+    --default-touch-mode 4 --hide-cursor-delay 3000 \
     -- /usr/bin/env "${steam_env[@]}" \
     "$prefix/steamos/steam-client.sh" -gamepadui -steamos3

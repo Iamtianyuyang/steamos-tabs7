@@ -36,5 +36,15 @@ BOOT `f3ef5daa676fd9c73698ae1e57967969fdb3ab0a0069103dd3660c9ac6d71f7a`
   （固件 0x24，校验字节互补，1600×2560，10 点，中断类型 1=下降沿），RESET_COMPLETE `0xa3`；
 - 用户在 Steam 界面点击和滑动，确认 **Steam 有反应**；TLMM15 中断 226 次，无 I2C 错误。
 
-原始记录在 `out/display-recovery/20261025/touch2/`。仍待：多指、四角与边缘坐标、
+### 会话触摸模式
+
+主线会话最初没有传 `--default-touch-mode`，gamescope 使用默认的 1（left）：每个触点
+被翻成鼠标左键，滑动变成拖拽，列表不能滚动；用户反馈“逻辑不适合触屏”。
+`userspace/steamos/gamescope-session` 改为与 SteamOS 会话相同的
+`--default-touch-mode 4 --hide-cursor-delay 3000`（4 = passthrough，原生触摸交给 Steam）。
+部署到设备的 `gamescope-session.mainline-6.18`（SHA-256 `93bd4ec4...ec39`，与仓库一致）后
+以 SIGKILL 结束旧 gamescope，由单元的 `Restart=on-failure` 重新拉起；新进程命令行含
+该参数。用户确认单击触发、滑动可滚动，触屏逻辑 **正常**；TLMM15 中断累计 904 次。
+
+原始记录在 `out/display-recovery/20261025/touch2/`（含 `touch-mode-passthrough.txt`）。仍待：多指、四角与边缘坐标、
 Steam 内长时间操作、DPMS 关 / 开及锁屏后的触摸恢复、屏幕键盘与输入。
