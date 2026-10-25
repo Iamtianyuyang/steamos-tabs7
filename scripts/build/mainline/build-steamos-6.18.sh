@@ -118,8 +118,14 @@ fi
 "${kmake[@]}" -j"$jobs" qcom/sm8250-samsung-gts7lwifi.dtb
 cp "$build_root/obj/arch/arm64/boot/dts/qcom/sm8250-samsung-gts7lwifi.dtb" "$out_dir/"
 if [[ "$target" == image ]]; then
-    "${kmake[@]}" -j"$jobs" Image.gz
+    "${kmake[@]}" -j"$jobs" Image.gz modules
     cp "$build_root/obj/arch/arm64/boot/Image" "$build_root/obj/arch/arm64/boot/Image.gz" "$out_dir/"
+    # External peripheral/debug modules must use the symbol CRCs of this Image.
+    # The Image target alone leaves only vmlinux.symvers on current Kbuild;
+    # the modules target also produces the final Module.symvers.
+    cp "$build_root/obj/Module.symvers" "$build_root/obj/modules.builtin" \
+        "$build_root/obj/modules.builtin.modinfo" "$build_root/obj/modules.order" "$out_dir/"
+    cp "$build_root/obj/include/config/kernel.release" "$out_dir/"
 fi
 cp "$build_root/obj/.config" "$out_dir/kernel.config"
 
