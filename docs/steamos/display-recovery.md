@@ -199,3 +199,27 @@ video test-pattern 设置，保存寄存器并在卸载时恢复；没有写 PLL
 `mainline-pll-first-dual-overlay.*`。这次尚未验收 Steam 实际内容、冷启动
 自动出图及输入功能。冷启动早期主链路仍曾读到休眠 `08`，需与实际会话
 启动阶段对照，不能把手动 DPMS 后的全屏通过写为完整启动验收。
+
+### Steam 渲染器系统调用缺失
+
+切回 Game Mode 后，用户看到持续打印的控制台，而非 Steam。DRM 实际扫描的是
+`allocated by = [fbcon]` 的 FB91，Steam 仅创建了辅助小窗口，没有主界面窗口。
+不能以 gamescope/steam 进程存在作为实际会话通过。
+
+Steam 的 `steamwebhelper.log` 重复报 page allocator `Function not implemented (38)`；
+对 zygote 子进程做 5 秒、只记录 madvise 的限时 strace，实际捕获到
+`madvise(..., MADV_DONTNEED) = -1 ENOSYS` 后紧接 `SIGTRAP` 和子进程退出。
+独立匿名页 syscall 探针同样返回 rc=-1、errno=38。内核
+`CONFIG_ADVISE_SYSCALLS` 未启用，`mm/Makefile` 因此未链接 madvise.o。
+
+仅在 SteamOS 基础配置补 `CONFIG_ADVISE_SYSCALLS=y`，保留所有已验证的面板
+修正。新镜像为 `503b3d0d94050e1daa7bcd55bd450cc3023cd7f09d4bee251ed506945991882c`；
+配置核验确认保留该项，85 项主机测试通过、1 项跳过。待重启验证 syscall
+返回值、渲染器稳定性、实际窗口和用户可见界面。修复前证据为
+`pll-first-enable/madvise-trace.txt`、`madvise-syscall-before.txt` 等。
+
+`503b3d0d...1882c` 已完整写入并读回校验，启动内核为 6.18.58 #47。相同匿名页
+探针返回 rc=0、errno=0；Steam 的 2560×1600 主窗口已创建，DRM 记录实际
+Gamescope FB101，截图包含 Steam 的 Logging in 页面，CEF 不再出现原来的
+madvise 崩溃循环。但用户确认物理屏幕黑屏；DCS 仍为休眠 `08`、亮度零，
+所以仅确认 Steam 系统调用与界面生成已修复，冷启动面板交接仍未通过。
