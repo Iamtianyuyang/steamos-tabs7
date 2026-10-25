@@ -11,6 +11,8 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/linux-event-codes.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include <dt-bindings/sound/qcom,q6afe.h>
+#include <dt-bindings/sound/qcom,q6asm.h>
 #include "sm8250.dtsi"
 #include "pm8150.dtsi"
 #include "pm8150b.dtsi"
@@ -359,7 +361,11 @@
 	qcom,gpi-ee-offset = <0x1000>;
 	status = "okay";
 };
-&gpi_dma1 { status = "okay"; };
+/* Vendor gpi_dma1 EE offset; i2c11 (speaker amplifiers) is a client. */
+&gpi_dma1 {
+	qcom,gpi-ee-offset = <0x6000>;
+	status = "okay";
+};
 &gpi_dma2 { status = "okay"; };
 
 &qupv3_id_0 { status = "okay"; };
@@ -489,6 +495,147 @@
 };
 
 /* ----------------------------------------------------------------
+ * Speakers: ADSP (Q6 AFE) Primary TDM -> four CS35L41 amplifiers.
+ * Vendor audio_gts7xl_common.dtsi (included by gts7lwifi r02..r07):
+ * qupv3_se11_i2c at 1 MHz, amps 0x43 FL, 0x42 FR, 0x41 RL, 0x40 RR, shared
+ * IRQ TLMM84 and reset TLMM69; tdm_pri_rx 6.144 MHz, sync mode 0, internal
+ * sync, data delay 1, 32-bit slots. "cirrus,right-channel-amp" amps take
+ * slot 1, the others slot 0.
+ *
+ * The vendor driver never writes the boost converter coefficients, so the
+ * amps run at the reset values BSTCVRT_COEFF 0x2424 / SLOPE_LBST 0x7500.
+ * The mainline tables give exactly those for 1000 nH and a capacitance in
+ * the 0..19 uF range; with the vendor 4100 mA peak current the registers end
+ * up identical.
+ * ---------------------------------------------------------------- */
+&adsp {
+	firmware-name = "qcom/sm8250/gts7lwifi/adsp.mdt";
+	status = "okay";
+};
+
+&q6afedai {
+	dai@16 {
+		reg = <PRIMARY_TDM_RX_0>;
+		qcom,tdm-sync-mode = <0>;
+		qcom,tdm-sync-src = <1>;
+		qcom,tdm-data-out = <0>;
+		qcom,tdm-invert-sync = <0>;
+		qcom,tdm-data-delay = <1>;
+		qcom,tdm-data-align = <0>;
+	};
+};
+
+/* q6asm-dai refuses to probe without at least one frontend DAI node. */
+&q6asmdai {
+	dai@0 {
+		reg = <MSM_FRONTEND_DAI_MULTIMEDIA1>;
+	};
+};
+
+&i2c11 {
+	clock-frequency = <1000000>;
+	status = "okay";
+
+	speaker_rr: amplifier@40 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x40>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "Rear Right";
+		interrupt-parent = <&tlmm>;
+		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
+		cirrus,boost-type = <0>;
+		cirrus,boost-peak-milliamp = <4100>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+		cirrus,asp-sdout-hiz = <3>;
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
+	};
+
+	speaker_rl: amplifier@41 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x41>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "Rear Left";
+		interrupt-parent = <&tlmm>;
+		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
+		cirrus,boost-type = <0>;
+		cirrus,boost-peak-milliamp = <4100>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+		cirrus,asp-sdout-hiz = <3>;
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
+	};
+
+	speaker_fr: amplifier@42 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x42>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "Front Right";
+		interrupt-parent = <&tlmm>;
+		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
+		cirrus,boost-type = <0>;
+		cirrus,boost-peak-milliamp = <4100>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+		cirrus,asp-sdout-hiz = <3>;
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
+	};
+
+	speaker_fl: amplifier@43 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x43>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "Front Left";
+		pinctrl-names = "default";
+		pinctrl-0 = <&speaker_amp_default>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <84 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
+		cirrus,boost-type = <0>;
+		cirrus,boost-peak-milliamp = <4100>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+		cirrus,asp-sdout-hiz = <3>;
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
+	};
+};
+
+&sound {
+	compatible = "qcom,sm8250-sndcard";
+	model = "SM-T870";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pri_tdm_default>;
+
+	mm1-dai-link {
+		link-name = "MultiMedia1";
+		cpu {
+			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
+		};
+	};
+
+	speaker-dai-link {
+		link-name = "Speaker Playback";
+		cpu {
+			sound-dai = <&q6afedai PRIMARY_TDM_RX_0>;
+		};
+		platform {
+			sound-dai = <&q6routing>;
+		};
+		codec {
+			sound-dai = <&speaker_fl 0>, <&speaker_fr 0>,
+				    <&speaker_rl 0>, <&speaker_rr 0>;
+		};
+	};
+};
+
+/* ----------------------------------------------------------------
  * max77705 充电/电量计（阶段 C）
  * 与 j716f (bq27541) 不同，不能照抄
  * i2c 总线号待从 downstream 核实后解注释
@@ -559,11 +706,7 @@
  * 远端处理器（阶段 E）
  * firmware-name 路径沿用 Samsung 设备命名惯例
  * ---------------------------------------------------------------- */
-&adsp {
-	status = "disabled";
-	firmware-name = "qcom/sm8250/gts7lwifi/adsp.mbn";
-};
-
+/* The ADSP is enabled with the speaker path above. */
 &cdsp {
 	status = "disabled";
 	firmware-name = "qcom/sm8250/gts7lwifi/cdsp.mbn";
@@ -790,6 +933,43 @@
 		function = "gpio";
 		drive-strength = <2>;
 		input-enable;
+		bias-disable;
+	};
+
+	/* Vendor pri_tdm_{clk,sync,din,dout}_active: 2 mA, no pull. */
+	pri_tdm_default: pri-tdm-default-state {
+		sck-pins {
+			pins = "gpio138";
+			function = "mi2s0_sck";
+		};
+
+		data0-pins {
+			pins = "gpio139";
+			function = "mi2s0_data0";
+		};
+
+		data1-pins {
+			pins = "gpio140";
+			function = "mi2s0_data1";
+		};
+
+		ws-pins {
+			pins = "gpio141";
+			function = "mi2s0_ws";
+		};
+
+		pinconf {
+			pins = "gpio138", "gpio139", "gpio140", "gpio141";
+			drive-strength = <2>;
+			bias-disable;
+		};
+	};
+
+	/* Vendor cs35l41_gpio_default: shared IRQ and reset, 2 mA, no pull. */
+	speaker_amp_default: speaker-amp-default {
+		pins = "gpio69", "gpio84";
+		function = "gpio";
+		drive-strength = <2>;
 		bias-disable;
 	};
 

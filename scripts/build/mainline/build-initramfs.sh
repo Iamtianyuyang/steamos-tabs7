@@ -31,6 +31,13 @@ done
 mkdir -p "$rootfs/lib/firmware/qcom/sm8250/gts7lwifi"
 cp "$firmware/a650_sqe.fw" "$firmware/a650_gmu.bin" "$rootfs/lib/firmware/qcom/"
 cp "$firmware/a650_zap.mdt" "$firmware/a650_zap.b00" "$firmware/a650_zap.b01" "$firmware/a650_zap.b02" "$rootfs/lib/firmware/qcom/sm8250/gts7lwifi/"
+# ADSP (speaker path): the PAS remoteproc boots it at probe, before the
+# SteamOS root exists, so the split image must be in the initramfs. Files are
+# from NON-HLOS image/; extracted and hash-checked into out/ (audio-6.18.md).
+adsp="$firmware/audio/adsp"
+(cd "$adsp" && sha256sum --quiet -c <(grep ' adsp/adsp\.' ../SHA256SUMS | sed 's| adsp/| |')) ||
+    { echo "ADSP firmware missing or changed: $adsp" >&2; exit 1; }
+cp "$adsp"/adsp.mdt "$adsp"/adsp.b[0-9][0-9] "$rootfs/lib/firmware/qcom/sm8250/gts7lwifi/"
 for applet in sh mount mkdir echo sleep ls head tail grep ln readlink ifconfig telnetd setsid dmesg cat ip i2cget i2cset i2ctransfer reboot poweroff; do
     ln -s busybox "$rootfs/bin/$applet"
 done

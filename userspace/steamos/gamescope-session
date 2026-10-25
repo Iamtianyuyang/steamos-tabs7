@@ -13,6 +13,7 @@ export SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0
 steam_env=(
     MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink
     LIBGL_KOPPER_DISABLE=1
+    STEAM_ENABLE_VOLUME_HANDLER=1
 )
 
 # The panel is native portrait 1600x2560; "right" is upright landscape

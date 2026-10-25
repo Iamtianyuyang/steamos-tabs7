@@ -18,6 +18,16 @@
 
 #define MI2S_BCLK_RATE		1536000
 
+/*
+ * Primary TDM to speaker amplifiers: four 32-bit slots at 48 kHz, so a
+ * 6.144 MHz bit clock. Playback uses slots 0 (left) and 1 (right); the AFE
+ * slot mapping takes each channel's byte offset within the frame.
+ */
+#define TDM_BCLK_RATE		6144000
+#define TDM_SLOTS		4
+#define TDM_SLOT_WIDTH		32
+static const unsigned int tdm_slot_offset[] = { 0, 4 };
+
 struct sm8250_snd_data {
 	bool stream_prepared[AFE_PORT_MAX];
 	struct snd_soc_card *card;
@@ -35,6 +45,9 @@ static int sm8250_snd_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 
 	switch (cpu_dai->id) {
+	case PRIMARY_TDM_RX_0:
+		/* Speaker amplifiers only: no headset jack behind this link. */
+		return 0;
 	case DISPLAY_PORT_RX:
 		return qcom_snd_dp_jack_setup(rtd, &data->dp_jack, 0);
 	case USB_RX:
@@ -64,10 +77,17 @@ static int sm8250_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_interval *channels = hw_param_interval(params,
 					SNDRV_PCM_HW_PARAM_CHANNELS);
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 
 	rate->min = rate->max = 48000;
 	channels->min = channels->max = 2;
-	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
+	if (cpu_dai->id == PRIMARY_TDM_RX_0) {
+		/* Sample width equals the slot width the amplifiers expect. */
+		snd_mask_none(fmt);
+		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S32_LE);
+	} else {
+		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
+	}
 
 	return 0;
 }
@@ -79,8 +99,23 @@ static int sm8250_snd_startup(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+	int i;
 
 	switch (cpu_dai->id) {
+	case PRIMARY_TDM_RX_0:
+		codec_dai_fmt |= SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_DSP_A;
+		snd_soc_dai_set_sysclk(cpu_dai,
+			Q6AFE_LPASS_CLK_ID_PRI_TDM_IBIT,
+			TDM_BCLK_RATE, SNDRV_PCM_STREAM_PLAYBACK);
+		for_each_rtd_codec_dais(rtd, i, codec_dai) {
+			snd_soc_dai_set_fmt(codec_dai, codec_dai_fmt);
+			/* Amplifiers clock their PLL from the TDM bit clock. */
+			snd_soc_component_set_sysclk(codec_dai->component, 0, 0,
+						     TDM_BCLK_RATE, SND_SOC_CLOCK_IN);
+			snd_soc_dai_set_sysclk(codec_dai, 0, TDM_BCLK_RATE,
+					       SND_SOC_CLOCK_IN);
+		}
+		break;
 	case PRIMARY_MI2S_RX:
 		codec_dai_fmt |= SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_I2S;
 		snd_soc_dai_set_sysclk(cpu_dai,
@@ -119,8 +154,50 @@ static void sm8250_snd_shutdown(struct snd_pcm_substream *substream)
 	struct sm8250_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
 	struct sdw_stream_runtime *sruntime = qcom_snd_sdw_get_stream(substream);
 
+	if (cpu_dai->id == PRIMARY_TDM_RX_0)
+		snd_soc_dai_set_sysclk(cpu_dai, Q6AFE_LPASS_CLK_ID_PRI_TDM_IBIT,
+				       0, SNDRV_PCM_STREAM_PLAYBACK);
+
 	data->sruntime[cpu_dai->id] = NULL;
 	sdw_release_stream(sruntime);
+}
+
+static int sm8250_tdm_hw_params(struct snd_soc_pcm_runtime *rtd,
+				struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	unsigned int channels = params_channels(params);
+	struct snd_soc_dai *codec_dai;
+	unsigned int rx_slot[2];
+	int i, ret;
+
+	if (channels > ARRAY_SIZE(tdm_slot_offset))
+		return -EINVAL;
+
+	ret = snd_soc_dai_set_tdm_slot(cpu_dai, 0, GENMASK(channels - 1, 0),
+				       TDM_SLOTS, TDM_SLOT_WIDTH);
+	if (ret < 0)
+		return ret;
+
+	ret = snd_soc_dai_set_channel_map(cpu_dai, 0, NULL, channels,
+					  tdm_slot_offset);
+	if (ret < 0)
+		return ret;
+
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+		const char *prefix = codec_dai->component->name_prefix;
+		bool right = prefix && strstr(prefix, "Right");
+
+		/* Each amplifier plays its own side from its first RX slot. */
+		rx_slot[0] = right;
+		rx_slot[1] = !right;
+		ret = snd_soc_dai_set_channel_map(codec_dai, 0, NULL,
+						  ARRAY_SIZE(rx_slot), rx_slot);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
 }
 
 static int sm8250_snd_hw_params(struct snd_pcm_substream *substream,
@@ -129,6 +206,15 @@ static int sm8250_snd_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct sm8250_snd_data *pdata = snd_soc_card_get_drvdata(rtd->card);
+	int ret;
+
+	if (cpu_dai->id == PRIMARY_TDM_RX_0) {
+		ret = sm8250_tdm_hw_params(rtd, params);
+		if (ret < 0) {
+			dev_err(rtd->dev, "TDM configuration failed: %d\n", ret);
+			return ret;
+		}
+	}
 
 	return qcom_snd_sdw_hw_params(substream, params, &pdata->sruntime[cpu_dai->id]);
 }

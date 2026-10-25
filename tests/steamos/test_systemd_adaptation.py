@@ -119,6 +119,13 @@ class AdaptationTests(unittest.TestCase):
         adaptation.uninstall(adaptation.Tree(self.root))
         self.assertEqual(snapshot(self.root), before)
 
+    def test_game_mode_steam_handles_volume_keys(self):
+        session = adaptation.SESSION.read_text()
+        environment = re.search(r'^steam_env=\(\n(.*?)^\)', session, re.M | re.S)
+        self.assertIsNotNone(environment)
+        self.assertRegex(environment.group(1),
+                         r'(?m)^\s*STEAM_ENABLE_VOLUME_HANDLER=1\s*$')
+
     def test_corrupt_gpu_firmware_is_refused(self):
         with self.assertRaises(ValueError):
             self.firmware(corrupt='a650_zap.b01')
