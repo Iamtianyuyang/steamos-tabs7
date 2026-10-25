@@ -133,13 +133,66 @@ Samsung 的 `pm8150a` 就是主线的 `pm8150l`，所以 `pm8150a_s8` 对应 `vr
   `sha256sum` 双侧校验。SteamOS 用户空间起来后 `/tmp` 不存在，落到
   `/dev/shm`；`nc` 监听进程必须在 telnet 会话保持打开期间接收，否则会被 SIGHUP。
 
+## 阶段 2：固件（已完成，真机能扫到 AP）
+
+厂商那套固件不能直接喂给 ath11k：vendor 的 `qca6390/amss20.bin` +
+`bdwlan.e05/elf*` 是 CNSS/CLD 的分文件布局，ath11k 要的是
+`ath11k/QCA6390/hw2.0/{amss.bin,m3.bin,board-2.bin}`，其中 `amss.bin` 是 MHI
+容器、`board-2.bin` 是带 `QCA-ATH11K-BOARD` 魔数的多板 BDF 容器。所以这一阶段
+用的是 **上游 linux-firmware**，不是把 vendor blob 改名。
+
+| 文件 | 字节数 | SHA-256（上游） |
+| --- | --- | --- |
+| `amss.bin` | 3,628,672 | `8ab2a06422e3989012df423bb6a156fde2c3feb4cd5db4c5d3588f674dc872ff` |
+| `m3.bin` | 266,684 | `1921d25edb52f90a7a0acc7275861e14399f904d579aae9f7ab1c4d28533fad6` |
+| `board-2.bin` | 231,980 | `4aa9f0fe15e9e2b6f9bb13b7187ed8ce035d9d46fb65fac5d5eba2c4e7edc091` |
+
+来源是 `git.kernel.org` 的 `linux-firmware` main（2026-10-25 取），每个文件的
+URL、大小和哈希记在 ignored `out/firmware/ath11k/manifest.json`，同目录的
+`SHA256SUMS` 供 initramfs 构建时校验。与 vendor 的 `m3.bin`（266,668 字节，
+`804777d7…`）**并不相同**，两者相差 16 字节：这是固件版本差异，不能混用。
+BDF 也没有沿用 vendor 的 `bdwlan.e05`：实机上报的是 `chip_id 0x0` /
+`board_id 0xff`，正好命中上游 `board-2.bin` 的通用项
+`bus=pci,qmi-chip-id=0,qmi-board-id=255`（同 SoC 的小米平板 5 Pro 也在这份 BDF
+里），所以暂不需要自己打包 board-2。
+
+`scripts/build/mainline/build-initramfs.sh` 现在会按 `SHA256SUMS` 校验并把这
+三个文件放进 initramfs 的 `lib/firmware/ath11k/QCA6390/hw2.0/`。原因和 ADSP
+一样：ath11k 在 PCI probe（约 2 秒）就要固件，远早于 SteamOS rootfs 挂载。
+
+### 真机结果
+
+候选 BOOT `out/steamos-kernel-6.18/wifi-fw/boot.img`（SHA-256
+`3510b350ef1029595b8838e4853ab53a29eebe4690f2b2d8cc9d7ed585fa6ad2`，71,303,168
+字节）写入 `/dev/sda22` 后读回一致；内核与上一轮相同，只有 initramfs 变了。
+
+| 观察 | 证据 |
+| --- | --- |
+| MHI 起固件 | `mhi mhi0: Power on setup success` → `Wait for device to enter SBL or Mission mode` |
+| 芯片与板号 | `chip_id 0x0 chip_family 0xb board_id 0xff soc_id 0xffffffff` |
+| 固件版本 | `fw_version 0x10121492 fw_build_timestamp 2021-11-04 11:23` |
+| 网卡出现 | `/sys/class/net` 有 `wlan0`，MAC `f6:f0:58:8f:33:f8`，`type managed`，txpower 21 dBm |
+| 实际扫描 | `iw dev wlan0 scan` 返回多个真实 BSS：5 GHz 5180 MHz（-53 dBm）与 2.4 GHz 2412 MHz（-56…-72 dBm），含 SSID/信道/信号 |
+
+`ath11k` 的 probe 现在完整通过，没有再出现 `-110` 或板数据错误。日志在
+`out/wifi-6.18/boot3-fw-dmesg.txt`、`boot3-ath11k-full.txt`、`boot3-scan2.txt`。
+
+### 尚未验证：关联、DHCP、桌面可见
+
+扫描只证明驱动、固件、BDF、监管域这条链可用，**不证明已连上 AP**。这一轮没有
+做关联：initramfs 里没有 `iw`/`wpa_supplicant`，`nmcli` 在 init 命名空间里连不上
+GUI 命名空间的 D-Bus（`Could not connect`），而 GUI 那边的 NetworkManager 是
+vendor 时期那套私有构建，尚未在主线路径上验证。`rfkill0`（`phy0`）读出来是
+`state 0` 但 `soft 1`，用 `ip link set wlan0 up` 可以拉起接口，扫描正常。
+
 ## 下一步（未做）
 
-1. 从本机 vendor 逻辑分区取 QCA6390 固件，按 ath11k 的路径布局
-   （`ath11k/QCA6390/hw2.0/amss.bin`、`m3.bin`、`board-2.bin`）落地并逐文件
-   校验；BDF 必须来自这台的 `bdwlan.e05`/`elf` 变体，不能用通用 blob。
-2. 重新上机，确认 MHI 启动、`FW_READY` 与 `wlan0` 出现，再看扫描与关联；
-   NetworkManager 在主线 mac80211 路径上不需要 vendor 那套零 gateway 路由补丁。
+1. 关联与 DHCP：在主线路径上验证 NetworkManager（或 `wpa_supplicant`）能扫描、
+   关联并拿到地址；vendor 那套零 gateway 路由补丁在 6.18 上不需要，但要确认
+   保存的 keyfile 能直接被用上。
+2. 蓝牙：先解决 `bt-enable-gpios` 到底是 TLMM 76 还是 21 的冲突，再走 `hci_qca`。
+3. 监管域与省电：`ath11k` 的 `regdb.bin`（本机 vendor 分区里有，19,348 字节）
+   目前没提供，扫描工作正常，若后续出现监管域告警再补。
 
 vmlinux 中已有的相关驱动入口：`qcom_qca6390_pmu`（pwrseq provider）、
 `pci_pwrctrl_pwrseq`（消费者）、`ath11k_pci`。

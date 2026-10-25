@@ -38,6 +38,15 @@ adsp="$firmware/audio/adsp"
 (cd "$adsp" && sha256sum --quiet -c <(grep ' adsp/adsp\.' ../SHA256SUMS | sed 's| adsp/| |')) ||
     { echo "ADSP firmware missing or changed: $adsp" >&2; exit 1; }
 cp "$adsp"/adsp.mdt "$adsp"/adsp.b[0-9][0-9] "$rootfs/lib/firmware/qcom/sm8250/gts7lwifi/"
+# ath11k (Wi-Fi): the WLAN subsystem asks for its firmware at PCI probe, long
+# before the SteamOS root exists. Upstream linux-firmware layout, not the
+# vendor cnss layout; hashes and origin are in out/firmware/ath11k/manifest.json.
+ath11k="$project_root/out/firmware/ath11k"
+(cd "$ath11k" && sha256sum --quiet -c SHA256SUMS) ||
+    { echo "ath11k firmware missing or changed: $ath11k" >&2; exit 1; }
+mkdir -p "$rootfs/lib/firmware/ath11k/QCA6390/hw2.0"
+cp "$ath11k"/QCA6390/hw2.0/amss.bin "$ath11k"/QCA6390/hw2.0/m3.bin \
+   "$ath11k"/QCA6390/hw2.0/board-2.bin "$rootfs/lib/firmware/ath11k/QCA6390/hw2.0/"
 for applet in sh mount mkdir echo sleep ls head tail grep ln readlink ifconfig telnetd setsid dmesg cat ip i2cget i2cset i2ctransfer reboot poweroff; do
     ln -s busybox "$rootfs/bin/$applet"
 done

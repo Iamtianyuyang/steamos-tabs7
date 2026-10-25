@@ -5,6 +5,8 @@ this device, not from upstream reference boards: upstream QCA6390 devices use
 different rails and different enable GPIOs.
 """
 from pathlib import Path
+import hashlib
+import json
 import re
 
 import pytest
@@ -204,3 +206,46 @@ def test_every_requested_config_symbol_exists_in_the_tree():
                                    path.read_text(errors='ignore'), re.M))
     for symbol in re.findall(r'^CONFIG_(\w+)=y$', CONFIG.read_text(), re.M):
         assert symbol in declared, symbol
+
+
+# Firmware: upstream linux-firmware layout, staged under the ignored out/ tree.
+FIRMWARE = ROOT / 'out/firmware/ath11k'
+INITRAMFS = ROOT / 'scripts/build/mainline/build-initramfs.sh'
+
+
+def test_initramfs_ships_the_ath11k_firmware():
+    """ath11k asks for its firmware at PCI probe, before the rootfs exists."""
+    script = INITRAMFS.read_text()
+    assert 'out/firmware/ath11k' in script
+    assert 'sha256sum --quiet -c SHA256SUMS' in script
+    for name in ('amss.bin', 'm3.bin', 'board-2.bin'):
+        assert name in script, name
+    assert 'lib/firmware/ath11k/QCA6390/hw2.0' in script
+
+
+def test_staged_firmware_matches_its_manifest():
+    manifest = FIRMWARE / 'manifest.json'
+    if not manifest.exists():
+        pytest.skip('staged firmware unavailable')
+    data = json.loads(manifest.read_text())
+    assert data['files'], 'manifest lists no files'
+    for entry in data['files']:
+        path = FIRMWARE / entry['path']
+        if not path.exists():
+            pytest.skip('staged firmware unavailable')
+        blob = path.read_bytes()
+        assert len(blob) == entry['size'], entry['path']
+        assert hashlib.sha256(blob).hexdigest() == entry['sha256'], entry['path']
+
+
+def test_board_data_covers_the_reported_board_id():
+    """The device reports qmi-chip-id 0 / qmi-board-id 0xff, like the Xiaomi
+    Pad 5 Pro; the generic 255 entry is the one ath11k then picks."""
+    board = FIRMWARE / 'QCA6390/hw2.0/board-2.bin'
+    if not board.exists():
+        pytest.skip('staged firmware unavailable')
+    blob = board.read_bytes()
+    # Names are padded inside the container, so match the prefixes.
+    assert b'bus=pci,qmi-chip-id=0,qmi-board-id=255' in blob
+    assert b'bus=pci,qmi-chip-id=0,qmi-board-id=4' in blob
+    assert b'bus=pci,qmi-chip-id=0,qmi-board-id=255,variant=Xiaomi_Pad_5Pro' in blob
