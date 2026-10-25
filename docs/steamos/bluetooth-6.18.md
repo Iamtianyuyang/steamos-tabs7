@@ -192,21 +192,38 @@ src/service.c:btd_service_connect() a2dp-sink profile connect failed ...: Protoc
 看到的 `Protocol not available`。**内核、设备树、固件在这条链上都已经没问题**，
 缺的是 PipeWire/WirePlumber 没有把 A2DP 端点注册给 BlueZ。
 
-### 下一步（都是 SteamOS 用户空间）
+### WirePlumber 根本没和 BlueZ 说话
 
-1. 让 WirePlumber 真正加载 bluez 监视器并注册端点：
-   在 `/etc/wireplumber/wireplumber.conf.d/` 里显式 `monitor.bluez = enabled`
-   （profile 名以 `wpctl status` 的显示为准），重启 `wireplumber` 后确认
-   `bluetoothd -d` 出现 `endpoint registered` 之类的日志。
-2. 若仍不注册，查 `libspa-bluez5.so` 的依赖闭包（它是 1.6.8 的插件，需与
-   PipeWire 版本严格匹配）以及 WP 是否有 `api.bluez5` 加载失败（把
-   `wireplumber` 的日志级别调成 debug）。
-3. 对照 vendor 4.19 镜像：那边若能用 A2DP，说明这个 SteamOS 镜像的 WP 配置与
-   主线无关；若那边也不行，就是镜像本身的 WP/BlueZ 组合问题。
+又做了两个更细的检查：
+
+1. `WIREPLUMBER_DEBUG=D` 重启 `wireplumber`：bluez 监视器的 Lua 脚本都加载了
+   （`monitor/bluez/{name-device,create-device,enumerate-device,...}` 的 hook 全部
+   `Registered hook ... successfully`），日志里**没有任何 bluez 相关错误**。
+2. `busctl monitor org.bluez --match='type=method_call'` 跨一次
+   `systemctl --user restart wireplumber`：**0 次 method call**。
+
+也就是说 WirePlumber 从头到尾没有向 `org.bluez` 发起任何调用，
+`org.bluez.Media1.RegisterEndpoint` 自然从未发生 → A2DP 没有本地 SEP →
+`a2dp_sink_connect()` 立刻 `ENOPROTOOPT`。镜像里
+`/usr/lib/spa-0.2/bluez5/libspa-bluez5.so` 与 codec 插件都在，
+`/etc/wireplumber/wireplumber.conf.d/20-bluetooth.conf` 只关了 `bluez-midi`，
+`wireplumber.conf` 里也没有关闭 `monitor.bluez`（只有 `mixin.systemwide-session`
+里关掉 `monitor.bluez.seat-monitoring`）。
+
+### 下一步（SteamOS 用户空间，按顺序）
+
+1. 用 `PIPEWIRE_DEBUG=4` 起一个 `pipewire -c pipewire.conf`（或给
+   `wireplumber` 打开 `pipewire` 侧日志）看 bluez5 SPA 插件是否成功连上 system
+   D-Bus；`busctl monitor` 的 0 次调用说明它根本没连上或被跳过。
+2. 检查是不是会话/配置把 bluez 监视器跳过了：比对 `wireplumber` 的 profile
+   （`wpctl status` 里没有 Bluetooth 段）和 `/usr/share/wireplumber/wireplumber.conf`
+   的 `wireplumber.components`/`profiles` 实际生效项。
+3. 拿 vendor 4.19 镜像做对照：那边 A2DP 能用就说明这个镜像的 WP 组合有问题，
+   与主线内核无关。
 
 ### 仍未做
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
   当前用的是本地管理地址 `02:00:00:00:5A:AD`。
-- A2DP/HFP 连通：卡在 WirePlumber 端点注册，见上。
+- A2DP/HFP 连通：卡在 WirePlumber 完全不与 BlueZ 交互，见上。
 
