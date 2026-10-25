@@ -682,8 +682,10 @@ config TOUCHSCREEN_MTOUCH
 config TOUCHSCREEN_NOVATEK_NVT_TS
 	tristate "Novatek NT11205 touchscreen support"
 	depends on I2C
+	depends on DRM || !DRM
 	help
-	  Say Y here if you have a Novatek NT11205 touchscreen.
+	  Say Y here if you have a Novatek NT11205, NT36523 or NT36672A
+	  touchscreen.
 	  If unsure, say N.
 
 	  To compile this driver as a module, choose M here: the

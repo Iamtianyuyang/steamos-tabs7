@@ -1,7 +1,7 @@
 # 内核迁移：厂商 4.19 → 主线 6.18 LTS
 
 SteamOS 的目标内核是主线 **6.18 LTS**（`linux-sm8250-v6.18/`，基线 6.18.58）。
-**6.18 已在真机启动；#49 冷启动无需手动操作即显示 Steam 界面（一次实测），触摸与重复启动仍待验收。**
+**6.18 已在真机启动；冷启动无需手动操作即显示 Steam 界面，#51 触摸在 Steam 内生效（各一次实测），重复启动与完整输入仍待验收。**
 2026-10-25 的显示复测中，基线与仅补 display-on 的候选均被用户确认黑屏。
 4.19 回退已恢复过完整 Steam 画面；当前 6.18 PLL 修正版已通过全屏彩色测试图，实际会话与启动仍待验收，详见[显示恢复记录](display-recovery.md)。
 这份文档记录构建方式、配置映射和各项独立验收；连接器 `connected`、进程 `active`
@@ -106,7 +106,7 @@ DTS 还没跑过 `dtbs_check`。
 | VT / seatd 变通 | 厂商内核无 VT，用 `SEATD_VTBOUND=0` | 主线有 VT/DRM，变通可保留但不再是必需 |
 | GPU（Turnip KGSL → Zink → wlroots/gamescope） | 私有 Mesa 走厂商 `KGSL`，双 VIG 由私有补丁拆分 | **主线没有 KGSL**，换成上游 `msm` + freedreno/Turnip。私有前缀 `turnip-kgsl/`、`mesa-zink*`、`gamescope-sm-t870` 的构建前提都变了 |
 | 面板与双 VIG | 厂商 DSI/DPU 行为 + `WLR_DRM_SM_T870_SPLIT=65,86` | 面板驱动是项目自带的；主线应在 DPU 内部完成左右拆分，见[面板与双 VIG](panel-6.18.md) |
-| 触摸 | 厂商 `sec_touchscreen`/nt36523 | 6.18 没有 nt36523 触摸驱动；`novatek-nvt-ts`（nt11205/nt36672a）是候选起点，协议是否相同待查 |
+| 触摸 | 厂商 `sec_touchscreen`/nt36523 | 主线 `novatek-nvt-ts` 加 `novatek,nt36523-ts` 与面板跟随，协议相同；#51 在 Steam 内可点击，见[触摸记录](touch-6.18.md) |
 | Wi-Fi / 蓝牙 | 厂商 `qcacld` + CNSS + 私有 NetworkManager | 主线路线是 `ath11k` + `hci_qca`，与现有 `userspace/platform/network/`、`platform/bluetooth/` 的适配对象不同 |
 
 ## 真机启动记录（2026-10-24）

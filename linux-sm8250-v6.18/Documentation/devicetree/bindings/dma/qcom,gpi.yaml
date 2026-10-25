@@ -79,6 +79,13 @@ properties:
   dma-channel-mask:
     maxItems: 1
 
+  qcom,gpi-ee-offset:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Offset subtracted from the register base to reach the execution
+      environment owned by Linux, when the firmware places it elsewhere
+      than the SoC default implied by the compatible.
+
   dma-coherent: true
 
 required:

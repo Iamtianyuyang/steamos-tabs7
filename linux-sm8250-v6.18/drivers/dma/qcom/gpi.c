@@ -2183,6 +2183,8 @@ static int gpi_probe(struct platform_device *pdev)
 	}
 
 	ee_offset = (uintptr_t)device_get_match_data(gpi_dev->dev);
+	/* Firmware that moves the APPS EE describes it like the downstream DT. */
+	of_property_read_u32(gpi_dev->dev->of_node, "qcom,gpi-ee-offset", &ee_offset);
 	gpi_dev->ee_base = gpi_dev->ee_base - ee_offset;
 
 	gpi_dev->ev_factor = EV_FACTOR;

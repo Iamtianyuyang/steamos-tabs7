@@ -14,8 +14,11 @@
 #include <linux/input/mt.h>
 #include <linux/input/touchscreen.h>
 #include <linux/module.h>
+#include <linux/property.h>
 
 #include <linux/unaligned.h>
+
+#include <drm/drm_panel.h>
 
 #define NVT_TS_TOUCH_START		0x00
 #define NVT_TS_TOUCH_SIZE		6
@@ -40,6 +43,8 @@
 #define NVT_TS_TOUCH_NEW		1
 #define NVT_TS_TOUCH_UPDATE		2
 #define NVT_TS_TOUCH_RELEASE		3
+#define NVT_TS_TOUCH_PALM		5
+#define NVT_TS_TOUCH_GLOVE		6
 
 static const int nvt_ts_irq_type[4] = {
 	IRQF_TRIGGER_RISING,
@@ -60,6 +65,15 @@ struct nvt_ts_data {
 	struct regulator_bulk_data regulators[2];
 	struct touchscreen_properties prop;
 	int max_touches;
+	/*
+	 * Touch-and-display (TDDI) controllers share supplies and reset with
+	 * the panel. The panel driver owns them; follow its power state and
+	 * only take interrupts while the panel is prepared.
+	 */
+	struct drm_panel_follower panel_follower;
+	bool is_panel_follower;
+	bool panel_prepared;	/* protected by input->mutex */
+	bool irq_enabled;	/* protected by input->mutex */
 	u8 buf[NVT_TS_TOUCH_SIZE * NVT_TS_MAX_TOUCHES];
 };
 
@@ -93,7 +107,7 @@ static irqreturn_t nvt_ts_irq(int irq, void *dev_id)
 {
 	struct nvt_ts_data *data = dev_id;
 	struct device *dev = &data->client->dev;
-	int i, error, slot, x, y;
+	int i, error, slot, tool, x, y;
 	bool active;
 	u8 *touch;
 
@@ -114,9 +128,14 @@ static irqreturn_t nvt_ts_irq(int irq, void *dev_id)
 			continue;
 		}
 
+		tool = MT_TOOL_FINGER;
 		switch (touch[0] & NVT_TS_TOUCH_TYPE_MASK) {
+		case NVT_TS_TOUCH_PALM:
+			tool = MT_TOOL_PALM;
+			fallthrough;
 		case NVT_TS_TOUCH_NEW:
 		case NVT_TS_TOUCH_UPDATE:
+		case NVT_TS_TOUCH_GLOVE:
 			active = true;
 			break;
 		case NVT_TS_TOUCH_RELEASE:
@@ -132,7 +151,7 @@ static irqreturn_t nvt_ts_irq(int irq, void *dev_id)
 		y = (touch[2] << 4) | (touch[3] & 0x0f);
 
 		input_mt_slot(data->input, slot);
-		input_mt_report_slot_state(data->input, MT_TOOL_FINGER, active);
+		input_mt_report_slot_state(data->input, tool, active);
 		touchscreen_report_pos(data->input, &data->prop, x, y, true);
 	}
 
@@ -142,10 +161,28 @@ static irqreturn_t nvt_ts_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+/* Called with input->mutex held. */
+static void nvt_ts_set_irq(struct nvt_ts_data *data, bool enable)
+{
+	if (data->irq_enabled == enable)
+		return;
+
+	if (enable)
+		enable_irq(data->client->irq);
+	else
+		disable_irq(data->client->irq);
+	data->irq_enabled = enable;
+}
+
 static int nvt_ts_start(struct input_dev *dev)
 {
 	struct nvt_ts_data *data = input_get_drvdata(dev);
 	int error;
+
+	if (data->is_panel_follower) {
+		nvt_ts_set_irq(data, data->panel_prepared);
+		return 0;
+	}
 
 	error = regulator_bulk_enable(ARRAY_SIZE(data->regulators), data->regulators);
 	if (error) {
@@ -153,7 +190,7 @@ static int nvt_ts_start(struct input_dev *dev)
 		return error;
 	}
 
-	enable_irq(data->client->irq);
+	nvt_ts_set_irq(data, true);
 	gpiod_set_value_cansleep(data->reset_gpio, 0);
 
 	return 0;
@@ -163,7 +200,10 @@ static void nvt_ts_stop(struct input_dev *dev)
 {
 	struct nvt_ts_data *data = input_get_drvdata(dev);
 
-	disable_irq(data->client->irq);
+	nvt_ts_set_irq(data, false);
+	if (data->is_panel_follower)
+		return;
+
 	gpiod_set_value_cansleep(data->reset_gpio, 1);
 	regulator_bulk_disable(ARRAY_SIZE(data->regulators), data->regulators);
 }
@@ -194,29 +234,64 @@ static int nvt_ts_resume(struct device *dev)
 
 static DEFINE_SIMPLE_DEV_PM_OPS(nvt_ts_pm_ops, nvt_ts_suspend, nvt_ts_resume);
 
-static int nvt_ts_probe(struct i2c_client *client)
+static int nvt_ts_panel_prepared(struct drm_panel_follower *follower)
 {
-	struct device *dev = &client->dev;
-	int error, width, height, irq_type;
-	struct nvt_ts_data *data;
-	const struct nvt_ts_i2c_chip_data *chip;
-	struct input_dev *input;
+	struct nvt_ts_data *data = container_of(follower, struct nvt_ts_data, panel_follower);
 
-	if (!client->irq) {
-		dev_err(dev, "Error no irq specified\n");
+	mutex_lock(&data->input->mutex);
+	data->panel_prepared = true;
+	if (input_device_enabled(data->input))
+		nvt_ts_set_irq(data, true);
+	mutex_unlock(&data->input->mutex);
+
+	return 0;
+}
+
+static int nvt_ts_panel_unpreparing(struct drm_panel_follower *follower)
+{
+	struct nvt_ts_data *data = container_of(follower, struct nvt_ts_data, panel_follower);
+
+	mutex_lock(&data->input->mutex);
+	data->panel_prepared = false;
+	nvt_ts_set_irq(data, false);
+	mutex_unlock(&data->input->mutex);
+
+	return 0;
+}
+
+static const struct drm_panel_follower_funcs nvt_ts_panel_follower_funcs = {
+	.panel_prepared = nvt_ts_panel_prepared,
+	.panel_unpreparing = nvt_ts_panel_unpreparing,
+};
+
+/*
+ * A panel follower cannot talk to the controller before the panel is up,
+ * so the geometry comes from the device tree instead of the parameter block.
+ */
+static int nvt_ts_follower_params(struct nvt_ts_data *data, int *width, int *height)
+{
+	struct device *dev = &data->client->dev;
+	u32 x, y;
+
+	if (device_property_read_u32(dev, "touchscreen-size-x", &x) ||
+	    device_property_read_u32(dev, "touchscreen-size-y", &y) ||
+	    !x || !y || x > NVT_TS_MAX_SIZE || y > NVT_TS_MAX_SIZE) {
+		dev_err(dev, "panel follower needs touchscreen-size-x/y\n");
 		return -EINVAL;
 	}
 
-	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
-	if (!data)
-		return -ENOMEM;
+	*width = x;
+	*height = y;
+	data->max_touches = NVT_TS_MAX_TOUCHES;
+	return 0;
+}
 
-	chip = device_get_match_data(&client->dev);
-	if (!chip)
-		return -EINVAL;
-
-	data->client = client;
-	i2c_set_clientdata(client, data);
+static int nvt_ts_read_params(struct nvt_ts_data *data,
+			      const struct nvt_ts_i2c_chip_data *chip,
+			      int *width, int *height, unsigned long *irq_flags)
+{
+	struct device *dev = &data->client->dev;
+	int error, irq_type;
 
 	/*
 	 * VCC is the analog voltage supply
@@ -253,12 +328,12 @@ static int nvt_ts_probe(struct i2c_client *client)
 	if (error)
 		return error;
 
-	width  = get_unaligned_be16(&data->buf[NVT_TS_PARAMS_WIDTH]);
-	height = get_unaligned_be16(&data->buf[NVT_TS_PARAMS_HEIGHT]);
+	*width  = get_unaligned_be16(&data->buf[NVT_TS_PARAMS_WIDTH]);
+	*height = get_unaligned_be16(&data->buf[NVT_TS_PARAMS_HEIGHT]);
 	data->max_touches = data->buf[NVT_TS_PARAMS_MAX_TOUCH];
 	irq_type = data->buf[NVT_TS_PARAMS_IRQ_TYPE];
 
-	if (width > NVT_TS_MAX_SIZE || height >= NVT_TS_MAX_SIZE ||
+	if (*width > NVT_TS_MAX_SIZE || *height >= NVT_TS_MAX_SIZE ||
 	    data->max_touches > NVT_TS_MAX_TOUCHES ||
 	    irq_type >= ARRAY_SIZE(nvt_ts_irq_type) ||
 	    data->buf[NVT_TS_PARAMS_WAKE_TYPE] != chip->wake_type ||
@@ -269,10 +344,49 @@ static int nvt_ts_probe(struct i2c_client *client)
 	}
 
 	dev_dbg(dev, "Detected %dx%d touchscreen with %d max touches\n",
-		width, height, data->max_touches);
+		*width, *height, data->max_touches);
 
 	if (data->buf[NVT_TS_PARAMS_MAX_BUTTONS])
 		dev_warn(dev, "Touchscreen buttons are not supported\n");
+
+	*irq_flags = nvt_ts_irq_type[irq_type];
+	return 0;
+}
+
+static int nvt_ts_probe(struct i2c_client *client)
+{
+	struct device *dev = &client->dev;
+	int error, width, height;
+	unsigned long irq_flags;
+	struct nvt_ts_data *data;
+	const struct nvt_ts_i2c_chip_data *chip;
+	struct input_dev *input;
+
+	if (!client->irq) {
+		dev_err(dev, "Error no irq specified\n");
+		return -EINVAL;
+	}
+
+	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	chip = device_get_match_data(&client->dev);
+	if (!chip)
+		return -EINVAL;
+
+	data->client = client;
+	i2c_set_clientdata(client, data);
+
+	/* Without parameters from the chip, the DT supplies the trigger type. */
+	irq_flags = 0;
+	data->is_panel_follower = drm_is_panel_follower(dev);
+	if (data->is_panel_follower)
+		error = nvt_ts_follower_params(data, &width, &height);
+	else
+		error = nvt_ts_read_params(data, chip, &width, &height, &irq_flags);
+	if (error)
+		return error;
 
 	input = devm_input_allocate_device(dev);
 	if (!input)
@@ -285,6 +399,8 @@ static int nvt_ts_probe(struct i2c_client *client)
 
 	input_set_abs_params(input, ABS_MT_POSITION_X, 0, width - 1, 0, 0);
 	input_set_abs_params(input, ABS_MT_POSITION_Y, 0, height - 1, 0, 0);
+	/* Lets userspace ignore palm contacts instead of treating them as fingers. */
+	input_set_abs_params(input, ABS_MT_TOOL_TYPE, 0, MT_TOOL_MAX, 0, 0);
 	touchscreen_parse_properties(input, true, &data->prop);
 
 	error = input_mt_init_slots(input, data->max_touches,
@@ -296,12 +412,18 @@ static int nvt_ts_probe(struct i2c_client *client)
 	input_set_drvdata(input, data);
 
 	error = devm_request_threaded_irq(dev, client->irq, NULL, nvt_ts_irq,
-					  IRQF_ONESHOT | IRQF_NO_AUTOEN |
-						nvt_ts_irq_type[irq_type],
+					  IRQF_ONESHOT | IRQF_NO_AUTOEN | irq_flags,
 					  client->name, data);
 	if (error) {
 		dev_err(dev, "failed to request irq: %d\n", error);
 		return error;
+	}
+
+	if (data->is_panel_follower) {
+		data->panel_follower.funcs = &nvt_ts_panel_follower_funcs;
+		error = devm_drm_panel_add_follower(dev, &data->panel_follower);
+		if (error)
+			return dev_err_probe(dev, error, "failed to follow panel\n");
 	}
 
 	error = input_register_device(input);
@@ -323,8 +445,12 @@ static const struct nvt_ts_i2c_chip_data nvt_nt36672a_ts_data = {
 	.chip_id = 0x08,
 };
 
+/* Only used as a panel follower: the parameter block is never checked. */
+static const struct nvt_ts_i2c_chip_data nvt_nt36523_ts_data = { };
+
 static const struct of_device_id nvt_ts_of_match[] = {
 	{ .compatible = "novatek,nt11205-ts", .data = &nvt_nt11205_ts_data },
+	{ .compatible = "novatek,nt36523-ts", .data = &nvt_nt36523_ts_data },
 	{ .compatible = "novatek,nt36672a-ts", .data = &nvt_nt36672a_ts_data },
 	{ }
 };

@@ -343,7 +343,16 @@
 /* ----------------------------------------------------------------
  * GPI DMA（i2c/spi 控制器依赖）
  * ---------------------------------------------------------------- */
-&gpi_dma0 { status = "okay"; };
+/*
+ * The Samsung firmware moves the APPS execution environment: the vendor
+ * kona.dtsi gives qcom,gpi-ee-offset 0x1000 for gpi_dma0 (0x6000 for
+ * gpi_dma1/2, which have no GSI-mode client here yet). With the default 0
+ * every EV ALLOCATE on gpi_dma0 times out and i2c5 (touch) cannot probe.
+ */
+&gpi_dma0 {
+	qcom,gpi-ee-offset = <0x1000>;
+	status = "okay";
+};
 &gpi_dma1 { status = "okay"; };
 &gpi_dma2 { status = "okay"; };
 
@@ -436,25 +445,29 @@
  * TLMM pinctrl
  * ---------------------------------------------------------------- */
 /* ----------------------------------------------------------------
- * 触摸 Novatek nvt-ts（阶段 C）
- * QUP5 = i2c5 (GPIO12=SDA, GPIO13=SCL); IRQ=tlmm15 (QUP5 原 SPI CS 脚)
- * reset GPIO 待从 downstream 核实（tlmm 编号未知）
+ * Touchscreen: the touch half of the NT36523 TDDI, values from the vendor
+ * input_gts7l_common.dtsi (qupv3_se5_i2c, touchscreen@62, irq-gpio tlmm 15
+ * with flags 0x2002 = falling | oneshot, resolution <1600 2560>). The vendor
+ * driver reads events from the firmware address 0x01; 0x62 is the
+ * bootloader/hardware address. Supplies and reset belong to the panel.
  * ---------------------------------------------------------------- */
 &i2c5 {
-	status = "disabled";
+	status = "okay";
 	clock-frequency = <400000>;
 
-	novatek-ts@62 {
-		compatible = "novatek,nvt-ts";
-		reg = <0x62>;
+	touchscreen@1 {
+		compatible = "novatek,nt36523-ts";
+		reg = <0x01>;
 
 		interrupt-parent = <&tlmm>;
 		interrupts = <15 IRQ_TYPE_EDGE_FALLING>;
-		/* TODO: reset-gpios = <&tlmm ??? GPIO_ACTIVE_LOW>; */
+		pinctrl-names = "default";
+		pinctrl-0 = <&touch_irq_default>;
 
-		touchscreen-size-x = <2560>;
-		touchscreen-size-y = <1600>;
-		max-touch-num = <10>;
+		panel = <&display_panel>;
+
+		touchscreen-size-x = <1600>;
+		touchscreen-size-y = <2560>;
 	};
 };
 
@@ -678,7 +691,7 @@
  * 初始化序列与时序由 scripts/steamos/emit-panel-seq.py 生成，不在此处维护。
  */
 &mdss_dsi0 {
-	panel@0 {
+	display_panel: panel@0 {
 		compatible = "samsung,gts7l-nt36523";
 		status = "okay";
 		reg = <0>;
@@ -759,6 +772,13 @@
 		pins = "gpio46";
 		function = "gpio";
 		drive-strength = <2>;
+		input-enable;
+		bias-disable;
+	};
+
+	touch_irq_default: touch-irq-default {
+		pins = "gpio15";
+		function = "gpio";
 		input-enable;
 		bias-disable;
 	};

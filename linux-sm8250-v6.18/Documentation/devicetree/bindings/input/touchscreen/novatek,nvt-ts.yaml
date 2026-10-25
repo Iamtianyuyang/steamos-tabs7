@@ -16,6 +16,7 @@ properties:
   compatible:
     enum:
       - novatek,nt11205-ts
+      - novatek,nt36523-ts
       - novatek,nt36672a-ts
 
   reg:
@@ -29,6 +30,12 @@ properties:
 
   vcc-supply: true
   iovcc-supply: true
+
+  panel:
+    description:
+      Touch-and-display controller sharing supplies and reset with this
+      panel. The driver then follows the panel power state instead of
+      controlling reset-gpios and the supplies itself.
 
 required:
   - compatible
