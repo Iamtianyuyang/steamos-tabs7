@@ -154,18 +154,43 @@ src/service.c:btd_service_connect() a2dp-sink profile connect failed ...: Protoc
 - `hciconfig hci0` 为 `UP RUNNING PSCAN`，`ACL MTU 1024:7 SCO MTU 240:4`；
 - 扫描能发现真实设备（12 秒 18 台），两台音频设备已 `Paired: yes / Bonded: yes`。
 
-### 下一步的候选（按优先级）
+### strace 结论：失败不在内核
 
-1. 用 `btmon` 抓一次 connect（`CONFIG_BT_DEBUGFS` 已开，`btmon` 走 HCI 监控），看
-   BlueZ 在返回 ENOPROTOOPT 之前到底有没有发 HCI 命令；若没有，问题就在 BlueZ 侧
-   的 socket 选项/插件，而不是控制器。
-2. 排查是否为**旧 bond 的 link key 不匹配**：这两台设备是在 `BT_BREDR=n` 的内核上
-   配对的，删掉重配一次（`bluetoothctl remove` + 重新 `pair`）再看。
-3. 若确认是 BlueZ 5.79 A2DP 与内核 socket 选项不兼容，再考虑在镜像里换 BlueZ 版本或
-   打补丁；这属于 SteamOS 适配层，不再是内核设备树/配置的问题。
+把 `bluetoothd` 换成带 debug 的实例并用 `strace -f -e trace=socket,setsockopt,connect`
+跟踪一次连接（手机 `0C:BD:75:AA:23:AC`，仍在 bond 里）：
+
+- trace 里**没有任何一次失败的 syscall**（`grep '= -1'` 为空）；
+- 能看到的都是成功的 L2CAP 建 socket 与选项设置：
+  `socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP)`、
+  `setsockopt(SOL_BLUETOOTH, BT_SECURITY, " ")`、
+  `setsockopt(SOL_BLUETOOTH, BT_DEFER_SETUP, [30])` 全部返回 0；
+- trace 停在最后一次 `setsockopt(23, BT_DEFER_SETUP)`，**没有出现 `connect()`**。
+
+也就是说 `Protocol not available` 是 **bluetoothd 自己返回的**（A2DP profile
+在该构建里拿不到可用的本地端点/编解码器），不是内核对 socket 的拒绝。内核侧的
+结论因此是完整的：BR/EDR、LE、L2CAP/SCO socket、控制器固件、射频（能扫到设备、
+能配对、能生成 IRK）都正常。
+
+这也解释了为什么前面那些内核配置补齐只改变了周边行为（IRK 生成、HID/LE 可用），
+却没有改变 A2DP 的错误。
+
+### 下一步属于 SteamOS 用户空间
+
+1. 查这个 BlueZ 5.79 构建里 A2DP 端点是否注册成功：启动日志目前只有
+   `does not support csip/asha plugin` 之类的信息，需要确认 SBC/AAC 编解码插件
+   有没有编进 `bluetoothd`（`profiles/audio/*`）。
+2. 对照同一个镜像在 **vendor 4.19** 上的行为：如果那边能连 A2DP，问题就在
+   这个 BlueZ 构建与主线内核的无 `ENOPROTOOPT` 无关；如果那边也不行，就说明是
+   镜像本身的 BlueZ 缺插件。
+3. 若确认缺插件，属于 SteamOS 适配层（换/重编 BlueZ，或补 codec 依赖），
+   不再是 `steamos-bluetooth-6.18.config` 或设备树的问题。
+
+证据：`out/wifi-6.18/bootE-bt-strace.txt`、`bootE-bt-strace2.txt`、
+`bootE-bt-sockopts.txt`（socket 选项探针）、`bootE-bt-btmon.txt`（btmon 可用，
+但失败发生在 HCI 之前所以抓不到命令）、`bootE-bt-connect.txt`。
 
 ### 仍未做
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
   当前用的是本地管理地址 `02:00:00:00:5A:AD`。
-- 配对/连接（需要一台可控的外设）。
+- A2DP/HFP 连通（卡在 BlueZ 用户空间，见上）。
