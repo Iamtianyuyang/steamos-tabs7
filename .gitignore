@@ -1,0 +1,11 @@
+# Build artifacts, downloads and device evidence stay out of Git.
+/out/
+/build/
+__pycache__/
+*.pyc
+
+# Local code graph cache.
+/.codebase-memory/
+
+# Local agent settings and caches.
+.claude/settings.local.json
