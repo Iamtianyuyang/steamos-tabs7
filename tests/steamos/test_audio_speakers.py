@@ -182,3 +182,16 @@ def test_routing_opens_the_adm_with_the_backend_width():
     assert re.search(r'case SNDRV_PCM_FORMAT_S32_LE:\s*session->bits_per_sample = 32;', hw)
     machine = (KERNEL / 'sound/soc/qcom/sm8250.c').read_text()
     assert 'SNDRV_PCM_FORMAT_S32_LE' in function(machine, 'static int sm8250_be_hw_params_fixup(')
+
+
+def test_wireplumber_config_keeps_bluetooth_working():
+    """The bluez monitor only runs without seat monitoring in this session.
+
+    WirePlumber 0.5's bluez monitor is created only when logind reports an
+    active seat; the Game Mode session has none, so A2DP endpoints would never
+    be registered and every Bluetooth connect would fail with "Protocol not
+    available".
+    """
+    conf = (ROOT / 'userspace/steamos/wireplumber/99-tabs7-audio.conf').read_text()
+    assert 'monitor.bluez.seat-monitoring = disabled' in conf
+    assert 'wireplumber.profiles' in conf

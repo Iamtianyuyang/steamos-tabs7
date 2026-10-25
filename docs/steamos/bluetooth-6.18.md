@@ -192,90 +192,73 @@ src/service.c:btd_service_connect() a2dp-sink profile connect failed ...: Protoc
 看到的 `Protocol not available`。**内核、设备树、固件在这条链上都已经没问题**，
 缺的是 PipeWire/WirePlumber 没有把 A2DP 端点注册给 BlueZ。
 
-### WirePlumber 根本没和 BlueZ 说话
+## A2DP 缺失的根因：WirePlumber 只在有「座位」时才起蓝牙监视器
 
-又做了两个更细的检查：
+排查链条的最后一步在 WirePlumber 的 Lua 里。0.5.18 的
+`scripts/monitors/bluez/enumerate-device.lua` 是这么创建监视器的：
 
-1. `WIREPLUMBER_DEBUG=D` 重启 `wireplumber`：bluez 监视器的 Lua 脚本都加载了
-   （`monitor/bluez/{name-device,create-device,enumerate-device,...}` 的 hook 全部
-   `Registered hook ... successfully`），日志里**没有任何 bluez 相关错误**。
-2. `busctl monitor org.bluez --match='type=method_call'` 跨一次
-   `systemctl --user restart wireplumber`：**0 次 method call**。
+```lua
+if config.seat_monitoring then
+  logind_plugin = Plugin.find("logind")
+end
+...
+if logind_plugin then
+  function startStopMonitor(seat_state)
+    if seat_state == "active" then monitor = createMonitor() ... end
+  end
+  startStopMonitor(logind_plugin:call("get-state"))
+else
+  monitor = createMonitor()
+end
+```
 
-也就是说 WirePlumber 从头到尾没有向 `org.bluez` 发起任何调用，
-`org.bluez.Media1.RegisterEndpoint` 自然从未发生 → A2DP 没有本地 SEP →
-`a2dp_sink_connect()` 立刻 `ENOPROTOOPT`。镜像里
-`/usr/lib/spa-0.2/bluez5/libspa-bluez5.so` 与 codec 插件都在，
-`/etc/wireplumber/wireplumber.conf.d/20-bluetooth.conf` 只关了 `bluez-midi`，
-`wireplumber.conf` 里也没有关闭 `monitor.bluez`（只有 `mixin.systemwide-session`
-里关掉 `monitor.bluez.seat-monitoring`）。
+而 `monitor.bluez.seat-monitoring` 默认**开启**。这台机器的 logind 会话
+（`c1 ... background`、`c2 ... manager`）**都没有 seat**，`get-state` 不是
+`active`，于是 `createMonitor()` 从未被调用：
 
-### 更正一个中间结论：文件没缺，是监视器不启动
+- 没有 `api.bluez5.enum.dbus` 设备 → `api.bluez5.monitor` 工厂从未实例化；
+- 因此 `busctl monitor org.bluez` 看到 0 次调用、bluetoothd 0 条
+  `Endpoint registered`；
+- 因此 SDP 里没有 Audio Sink/Source，连接就是 `Protocol not available`。
 
-一度以为 `monitors/bluez.lua` 被镜像删了，实际不是：0.5.18 已经改成事件驱动，
-`provides = monitor.bluez` 由 `scripts/monitors/bluez/enumerate-device.lua` 提供，
-`pacman -Qkk wireplumber` 报告 **328 个文件、0 个被改动**，包是完整的。
-`wireplumber.conf` 里 `monitor.bluez` 及其全部 hook 都在，`WIREPLUMBER_DEBUG=D`
-显示它们全部注册成功。
+与 `monitor.bluez.seat-monitoring` 同一机理的问题在本项目里已经出现过一次：
+Game Mode 的会话没有 seat，polkit 的 `allow_active` 也不生效（suspend 规则就是
+为此加的）。
 
-真正的现象是：`PIPEWIRE_DEBUG=4` 下整份日志里只有一条 bluez 记录，就是 SPA 库
-映射 `api.bluez5.* → bluez5/libspa-bluez5`，**这个工厂从未被实例化**，所以
-PipeWire 从来没有去连 BlueZ 的 D-Bus（与 `busctl monitor` 的 0 次调用一致）。
+### 修复
 
-| 层 | 结论 |
+在 WirePlumber 的 drop-in 里关掉座位监视（仓库文件
+`userspace/steamos/wireplumber/99-tabs7-audio.conf`）：
+
+```conf
+wireplumber.profiles = {
+  main = {
+    monitor.bluez.seat-monitoring = disabled
+```
+
+部署到 `/etc/wireplumber/wireplumber.conf.d/99-tabs7-audio.conf` 并重启
+`wireplumber` 后立刻生效。
+
+### 真机验证
+
+| 观察 | 结果 |
 | --- | --- |
-| 内核 / 固件 / 控制器 | 已验证可用（见上） |
-| BlueZ（适配器、扫描、配对、IRK） | 已验证可用 |
-| WirePlumber 配置与 bluez hook | 已加载，但 `api.bluez5.monitor` 设备从未被创建 |
-| 结果 | BlueZ 没有 A2DP 端点 → `Protocol not available` |
+| bluetoothd `Endpoint registered` | 从 **0 条**变成 21 条：`/MediaEndpoint/A2DPSink/{sbc,…}`、`/MediaEndpoint/A2DPSource/…`、`faststream`、`opus_05` |
+| 平板 SDP 服务 | 新增 **Audio Source、Audio Sink、AVRCP、Handsfree/AG**（此前只有 GAP/GATT/DIS/AVRCP） |
+| 主机（Intel AX210）→ 平板 | `Connected: yes`，主机侧出现 AVRCP `player0` |
+| 平板侧 PipeWire | `wpctl status` 出现 **`tianyy-L16 [bluez5]` 设备 + Sink 节点（已设为默认）** + Source |
+| 平板 → 主机 | `hci0 C4:0F:08:9C:79:02 type BR/EDR connected eir_len 12`，`Connected: yes` |
 
-### 下一步（SteamOS 用户空间）
+配对过程中还解决了一个附带问题：平板对本机是 `Authentication attempt without
+agent` 拒绝，`bluetoothctl trust` 之后连接成功。
 
-1. 在 PipeWire 运行中**触发一次 bluez 监视器事件**并抓 `create-bluez-device`
-   相关日志（`WIREPLUMBER_DEBUG=D` + `systemctl --user restart wireplumber`），
-   确认 `enumerate-device.lua` 是否真的枚举到适配器；如果它压根没跑，问题在
-   profile/component 解析，而不是 BlueZ。
-2. 对照 vendor 4.19 镜像：那边 A2DP 若可用，说明这是该 SteamOS 镜像的
-   PipeWire/WirePlumber 组合问题，与主线内核无关；若也不可用，则镜像本身不提供
-   经典蓝牙音频支持，需要换/补 PipeWire、WirePlumber 或 BlueZ。
-3. 这条链路已经与设备树、内核配置无关，属于 SteamOS 适配层。
-
-## 用主机做真实对端测试（已验证链路层）
-
-为了不再只靠平板自说自话，用本机（Intel AX210，`hci0`）当对端做了一次真连接：
-
-| 步骤 | 结果 |
-| --- | --- |
-| 平板设为 `Discoverable: yes` / `Pairable: yes` | 成功 |
-| 主机扫描 | 发现 `02:00:00:00:5A:AD frame`（本地管理地址工作正常） |
-| 主机 `bluetoothctl pair` | **`Paired: yes` / `Bonded: yes`** |
-| SDP 服务发现 | `ServicesResolved: yes` → 真实 ACL 连接与 L2CAP 数据交换走通 |
-| 平板公布的 SDP 服务 | GAP、GATT、Device Information、**AVRCP CT / AVRCP TG**、Multi Profile —— **没有 Audio Source / Audio Sink** |
-| 主机发起的 A2DP 连接 | 同样 `br-connection-profile-unavailable` |
-
-也就是说：**控制器、射频、配对、ACL、L2CAP、SDP 全部正常**，缺的确实是 A2DP
-这个 profile——与 WirePlumber 不注册端点完全一致，而且这次是从对端观察到的。
-
-`l2ping` 没能跑（需要 CAP_NET_RAW，本机 sudo 需要密码），但 SDP 往返已经证明
-数据面可用。
-
-### 与主机镜像的对照
-
-| | 主机（WirePlumber 0.4.17） | 平板（SteamOS, WirePlumber 0.5.18） |
-| --- | --- | --- |
-| `monitors/bluez.lua` | 有（0.4 架构） | 无——而且 **上游 0.5.18 本来就没有**（下载 0.5.18 源码比对确认） |
-| `wireplumber.conf` 的 bluez 组件 | — | 与上游 0.5.18 逐行一致（10 个 `monitors/bluez/*` 条目，`enumerate-device.lua` 提供 `monitor.bluez`） |
-| `Endpoints registered`（bluetoothd） | 有：`/MediaEndpoint/A2DPSink/…`、`A2DPSource/…` | **0 条** |
-| `api.bluez5.monitor` 工厂 | 使用中 | 从未实例化 |
-
-所以平板用的是**原版** WirePlumber 0.5.18（`pacman -Qkk` 0 改动、配置与上游一致），
-问题不在「镜像删文件」，而是 0.5.18 的 bluez 监视器在这台设备上没有把
-`api.bluez5.monitor` 拉起来——这一步属于 WirePlumber/PipeWire 用户空间，
-内核侧已被主机对端测试证明无问题。
+证据：`out/wifi-6.18/bt-seat-monitoring-test.txt`、`bt-connected-tablet.txt`、
+`bt-tablet-to-host.txt`、`bt-connect-attempt.txt`、`bt-after-seat-fix.txt`、
+`bt-repo-config-deploy.txt`。
 
 ### 仍未做
 
 - 真实出厂 BD_ADDR（需要 vendor 4.19 内核读 `/efs/bluetooth/bt_addr`）；
   当前用的是本地管理地址 `02:00:00:00:5A:AD`。
-- A2DP/HFP 连通：卡在 `api.bluez5.monitor` 从未实例化，见上。
-
+- 实际音频播放（主机推流到平板出声）没有单独验收，只验证了端点、连接与节点；
+  用户的耳机/手机现在应该可以从桌面正常连接，需要用户侧确认。
